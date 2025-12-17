@@ -88,6 +88,7 @@ def ensure_parent_dir(path):
 # ------------------------------------------------------------
 
 # python mhr_to_smpl.py --mhr_path /home/haziq/datasets/mocap/data/kit/train/files_motions_292/mhr/cam1/jumping_jack01_final.npz --out_json /home/haziq/datasets/mocap/data/kit/train/files_motions_292/smplx/cam1/jumping_jack01_final.json --show 1 --frame_id 50
+# python mhr_to_smpl.py --mhr_path /home/haziq/datasets/telept/data/ipad/rgb_1764569430654_trim_0_149_crop/rgb_1764569430654_trim_0_149_crop_mhr_outputs.npz --out_json /home/haziq/datasets/telept/data/ipad/rgb_1764569430654_trim_0_149_crop/rgb_1764569430654_trim_0_149_crop_mhr_outputs.json --show 1 --frame_id 140
 
 def main():
     parser = argparse.ArgumentParser()
