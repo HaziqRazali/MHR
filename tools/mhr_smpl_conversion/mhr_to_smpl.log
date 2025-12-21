@@ -1,0 +1,23 @@
+==============================================
+Processing subject: files_motions_1234
+MHR dir:   /home/haziq/datasets/mocap/data/kit/train/files_motions_1234/mhr/cam1
+SMPLX dir: /home/haziq/datasets/mocap/data/kit/train/files_motions_1234/smplx/cam1
+==============================================
+[RUN] files_motions_1234 / cam1 / take_book_from_shelf_right_arm_01_final
+==============================================
+Processing subject: files_motions_1235
+MHR dir:   /home/haziq/datasets/mocap/data/kit/train/files_motions_1235/mhr/cam1
+SMPLX dir: /home/haziq/datasets/mocap/data/kit/train/files_motions_1235/smplx/cam1
+==============================================
+[RUN] files_motions_1235 / cam1 / take_book_from_shelf_left_arm_01_final
+==============================================
+Processing subject: files_motions_1236
+MHR dir:   /home/haziq/datasets/mocap/data/kit/train/files_motions_1236/mhr/cam1
+SMPLX dir: /home/haziq/datasets/mocap/data/kit/train/files_motions_1236/smplx/cam1
+==============================================
+==============================================
+Processing subject: files_motions_1237
+MHR dir:   /home/haziq/datasets/mocap/data/kit/train/files_motions_1237/mhr/cam1
+SMPLX dir: /home/haziq/datasets/mocap/data/kit/train/files_motions_1237/smplx/cam1
+==============================================
+[RUN] files_motions_1237 / cam1 / open_pants_right_arm_01_final
