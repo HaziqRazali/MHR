@@ -11,7 +11,7 @@ from mhr.mhr import MHR
 from conversion import Conversion
 from smplx.lbs import batch_rodrigues
 
-sys.path.append(os.path.expanduser('~/datasets/mocap/my_scripts/'))
+sys.path.append(os.path.expanduser('/media/haziq/Haziq/mocap/my_scripts'))
 from utils_draw import render_simple_pyrender
 
 
@@ -118,7 +118,7 @@ def main():
     parser.add_argument(
         "--smplx_path",
         type=str,
-        default="~/datasets/mocap/data/models_smplx_v1_1/models/smplx/",
+        default="/media/haziq/Haziq/mocap/data/models_smplx_v1_1/models/smplx",
         help="Path to SMPL-X model folder (contains SMPLX_*.pkl). Default is your usual path.",
     )
     parser.add_argument(

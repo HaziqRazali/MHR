@@ -5,8 +5,9 @@ set -e
 # ------------------------------------------------------------
 # Paths
 # ------------------------------------------------------------
-DATA_ROOT="/home/haziq/datasets/mocap/data/kit/train"
-SCRIPT_PATH="/home/haziq/MHR/tools/mhr_smpl_conversion/mhr_to_smpl.py"
+# /media/haziq/Haziq/mocap/data/kit/train/files_motions_1234/mhr/cam1/
+DATA_ROOT="/media/haziq/Haziq/mocap/data/kit/train"
+SCRIPT_PATH="/media/haziq/Haziq/mocap/my_scripts/MHR/tools/mhr_smpl_conversion/mhr_to_smpl.py"
 
 # ------------------------------------------------------------
 # Loop over subject folders
