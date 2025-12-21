@@ -87,10 +87,6 @@ def ensure_parent_dir(path):
 # Main
 # ------------------------------------------------------------
 
-# python mhr_to_smpl.py --mhr_path /home/haziq/datasets/mocap/data/kit/train/files_motions_292/mhr/cam1/jumping_jack01_final.npz --out_json /home/haziq/datasets/mocap/data/kit/train/files_motions_292/smplx/cam1/jumping_jack01_final.json --show 1 --frame_id 50
-# python mhr_to_smpl.py --mhr_path /home/haziq/datasets/telept/data/ipad/rgb_1764569430654_trim_0_149_crop/rgb_1764569430654_trim_0_149_crop_mhr_outputs.npz --out_json /home/haziq/datasets/telept/data/ipad/rgb_1764569430654_trim_0_149_crop/rgb_1764569430654_trim_0_149_crop_mhr_outputs.json --show 1 --frame_id 140
-# python mhr_to_smpl.py --mhr_path /home/haziq/sam-3d-body/example_data/results/img.npz --out_json /home/haziq/sam-3d-body/example_data/results/img.json --show 1 --frame_id 0
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -114,7 +110,7 @@ def main():
     parser.add_argument(
         "--frame_id",
         type=int,
-        default=50,
+        default=0,
         help="Frame index for visualization when --show=1. Default 50.",
     )
     parser.add_argument(
@@ -174,8 +170,15 @@ def main():
         raise KeyError(f"Expected key 'vertices' in {args.mhr_path}, got keys: {data.files}")
 
     verts_mhr = data["vertices"]
-    if verts_mhr.ndim != 3 or verts_mhr.shape[-1] != 3:
-        raise ValueError(f"Expected vertices shape [T,V,3], got {verts_mhr.shape}")
+
+    # ✅ NEW: support both [T,V,3] and single-frame [V,3]
+    if verts_mhr.ndim == 2 and verts_mhr.shape[-1] == 3:
+        # Single timestep case: [V,3] -> [1,V,3]
+        verts_mhr = verts_mhr[None, ...]
+    elif verts_mhr.ndim == 3 and verts_mhr.shape[-1] == 3:
+        pass
+    else:
+        raise ValueError(f"Expected vertices shape [T,V,3] or [V,3], got {verts_mhr.shape}")
 
     T = verts_mhr.shape[0]
     if args.show:
