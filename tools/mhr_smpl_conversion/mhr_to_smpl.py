@@ -88,6 +88,8 @@ def ensure_parent_dir(path):
 # ------------------------------------------------------------
 
 # python mhr_to_smpl.py --mhr_path /home/haziq/datasets/mocap/data/kit/train/files_motions_292/mhr/cam1/jumping_jack01_final.npz --out_json /home/haziq/datasets/mocap/data/kit/train/files_motions_292/smplx/cam1/jumping_jack01_final.json --show 1 --frame_id 50
+# python mhr_to_smpl.py --mhr_path /home/haziq/datasets/telept/data/ipad/rgb_1764569430654_trim_0_149_crop/rgb_1764569430654_trim_0_149_crop_mhr_outputs.npz --out_json /home/haziq/datasets/telept/data/ipad/rgb_1764569430654_trim_0_149_crop/rgb_1764569430654_trim_0_149_crop_mhr_outputs.json --show 1 --frame_id 140
+# python mhr_to_smpl.py --mhr_path /home/haziq/sam-3d-body/example_data/results/img.npz --out_json /home/haziq/sam-3d-body/example_data/results/img.json --show 1 --frame_id 0
 
 def main():
     parser = argparse.ArgumentParser()
@@ -167,6 +169,7 @@ def main():
     # 2) Load MHR
     # ------------------------------------------------------------
     data = np.load(args.mhr_path, allow_pickle=True)
+    print(data.files)
     if "vertices" not in data.files:
         raise KeyError(f"Expected key 'vertices' in {args.mhr_path}, got keys: {data.files}")
 
