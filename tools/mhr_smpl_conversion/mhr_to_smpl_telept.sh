@@ -19,9 +19,9 @@ for npz in "$MHR_DIR"/*.npz; do
     --out_json "$json"
 done
 
-#./mhr_to_smpl_telept.sh /home/haziq/datasets/telept/data/ipad/rgb_1764569430654/timestamps/
-#./mhr_to_smpl_telept.sh /home/haziq/datasets/telept/data/ipad/rgb_1764569695903/timestamps/
-#./mhr_to_smpl_telept.sh /home/haziq/datasets/telept/data/ipad/rgb_1764569971278/timestamps/
+#./mhr_to_smpl_telept.sh $HOME/datasets/telept/data/ipad/rgb_1764569430654/timestamps/
+#./mhr_to_smpl_telept.sh $HOME/datasets/telept/data/ipad/rgb_1764569695903/timestamps/
+#./mhr_to_smpl_telept.sh $HOME/datasets/telept/data/ipad/rgb_1764569971278/timestamps/
 
 #python mhr_to_smpl.py \
 #--mhr_path /home/haziq/datasets/telept/data/ipad/rgb_1764569430654/timestamps/ts_0001_01-38.357_f001913_data.npz \

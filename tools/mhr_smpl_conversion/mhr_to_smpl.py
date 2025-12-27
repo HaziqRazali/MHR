@@ -11,7 +11,16 @@ from mhr.mhr import MHR
 from conversion import Conversion
 from smplx.lbs import batch_rodrigues
 
-sys.path.append(os.path.expanduser('/media/haziq/Haziq/mocap/my_scripts'))
+CANDIDATES = [
+    os.path.expanduser("/media/haziq/Haziq/mocap/my_scripts"),
+    os.path.expanduser("~/datasets/mocap/my_scripts"),
+]
+for p in CANDIDATES:
+    if os.path.isdir(p):
+        sys.path.append(p)
+        break
+else:
+    raise RuntimeError("Could not find my_scripts in known locations")
 from utils_draw import render_simple_pyrender
 
 
@@ -82,6 +91,15 @@ def ensure_parent_dir(path):
     if parent and not os.path.exists(parent):
         os.makedirs(parent, exist_ok=True)
 
+def find_smplx_path():
+    candidates = [
+        os.path.expanduser("/media/haziq/Haziq/mocap/data/models_smplx_v1_1/models/smplx"),
+        os.path.expanduser("~/datasets/mocap/data/models_smplx_v1_1/models/smplx"),
+    ]
+    for p in candidates:
+        if os.path.isdir(p):
+            return p
+    return None
 
 # ------------------------------------------------------------
 # Main
@@ -116,8 +134,11 @@ def main():
     parser.add_argument(
         "--smplx_path",
         type=str,
-        default="/media/haziq/Haziq/mocap/data/models_smplx_v1_1/models/smplx",
-        help="Path to SMPL-X model folder (contains SMPLX_*.pkl). Default is your usual path.",
+        default=find_smplx_path(),
+        help=(
+            "Path to SMPL-X model folder (contains SMPLX_*.pkl). "
+            "Defaults to first valid path under /media/... or ~/datasets/..."
+        ),
     )
     parser.add_argument(
         "--scale",
@@ -126,6 +147,11 @@ def main():
         help="Scale applied to MHR vertices before conversion (keeps your previous behavior).",
     )
     args = parser.parse_args()
+
+    if args.smplx_path is None:
+        raise RuntimeError(
+            "SMPL-X path not found. Please pass --smplx_path explicitly."
+        )
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     if args.show:
