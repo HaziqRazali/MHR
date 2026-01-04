@@ -168,8 +168,22 @@ def main():
     print(data.files)
     if "vertices" not in data.files:
         raise KeyError(f"Expected key 'vertices' in {args.mhr_path}, got keys: {data.files}")
-
     verts_mhr = data["vertices"]
+
+    if not np.isfinite(verts_mhr).all():
+        bad = ~np.isfinite(verts_mhr)
+
+        if verts_mhr.ndim == 3:  # [T, V, 3]
+            bad_frames = np.where(bad.any(axis=(1, 2)))[0]
+            print(
+                f"[WARN][NaN/Inf] Found invalid vertices in {args.mhr_path} "
+                f"at frames: {bad_frames[:20].tolist()} "
+                f"(showing first 20, total={len(bad_frames)})"
+            )
+        else:
+            print(
+                f"[WARN][NaN/Inf] Found invalid vertices in single-frame input {args.mhr_path}"
+            )
 
     # ✅ NEW: support both [T,V,3] and single-frame [V,3]
     if verts_mhr.ndim == 2 and verts_mhr.shape[-1] == 3:
@@ -191,6 +205,14 @@ def main():
         mhr_vertices=verts_mhr * float(args.scale),
         return_smpl_parameters=True,
     )
+
+    smplx_params = smplx_results.result_parameters
+    for k, v in smplx_params.items():
+        a = v.detach().cpu().numpy() if torch.is_tensor(v) else np.asarray(v)
+        ok = np.isfinite(a).all()
+        if not ok:
+            print(f"{args.mhr_path} [NaN after convert] {k} shape={a.shape}")
+            #sys.exit()
 
     smplx_params = smplx_results.result_parameters
     for k in smplx_params:
