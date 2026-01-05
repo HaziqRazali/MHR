@@ -137,6 +137,8 @@ class MHR(torch.nn.Module):
     ) -> "MHR":
         """Load character and model parameterization, and create full model."""
 
+        #print(folder) # /home/haziq/MHR/assets
+
         # Create character by fetching rig and model parameterization paths
         fbx_path = get_mhr_fbx_path(folder, lod)
         model_path = get_mhr_model_path(folder)
@@ -254,7 +256,7 @@ class MHR(torch.nn.Module):
             skel_state=skel_state, rest_vertex_positions=linear_model_unposed
         )
 
-        return verts, skel_state
+        return verts, skel_state, joint_parameters
 
 
 def set_blendshape_parameter_sets(character: pym_geometry.Character) -> None:
