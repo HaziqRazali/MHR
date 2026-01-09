@@ -76,7 +76,6 @@ class MHRPoseCorrectivesModel(torch.nn.Module):
         )
         return pose_corrective_offsets
 
-
 class MHR(torch.nn.Module):
     """MHR body model."""
 
@@ -199,7 +198,7 @@ class MHR(torch.nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute vertices given input parameters."""
 
-        # identity_coeffs: [b=batch_size, c=num_shape_coeff]
+        # identity_coeffs:  [b=batch_size, c=num_shape_coeff]
         # model_parameters: [b=batch_size, c=num_model_params (rigid, pose, scale)]
         # face_expr_coeffs: [b=batch_size, c=num_face_coeff]
         assert (
@@ -236,13 +235,28 @@ class MHR(torch.nn.Module):
             .to(model_parameters)
             .requires_grad_(False)
         )
-        joint_parameters = self.character_torch.model_parameters_to_joint_parameters(
-            torch.concatenate((model_parameters, model_padding), axis=1)
-        )
-        skel_state = self.character_torch.joint_parameters_to_skeleton_state(
-            joint_parameters
-        )
 
+        #print(model_parameters.shape)  # [256, 204]
+        #print(model_padding.shape)     # [256, 117]
+        
+        joint_parameters = self.character_torch.model_parameters_to_joint_parameters(torch.concatenate((model_parameters, model_padding), axis=1))
+        # joint_parameters: [batch=256, 127 joints * 7 params]
+        # Contains LOCAL transforms (relative to parent joint, not global/world space)
+        # Per-joint structure: [tx, ty, tz, rot_x, rot_y, rot_z, scale_param]
+        #   [:3]   : translation offset relative to parent
+        #   [3:6]  : local Euler XYZ rotation angles
+        #   [-1]   : log2 scale factor
+        # These are fed to forward kinematics to compute global skeleton state
+        
+        skel_state = self.character_torch.joint_parameters_to_skeleton_state(joint_parameters)
+        # skel_state: [batch=256, num_joints=127, 8 params per joint]
+        # Contains GLOBAL transforms in world/character space (result of forward kinematics)
+        # Per-joint structure: [tx, ty, tz, qx, qy, qz, qw, scale]
+        #   [:3]   : global joint position (not relative to parent)
+        #   [3:7]  : global rotation as quaternion (not relative to parent)
+        #   [7]    : global scale factor
+        # Accounts for entire parent chain hierarchy via FK
+        
         # Apply pose correctives
         linear_model_unposed = rest_pose
         if apply_correctives:
@@ -256,7 +270,7 @@ class MHR(torch.nn.Module):
             skel_state=skel_state, rest_vertex_positions=linear_model_unposed
         )
 
-        return verts, skel_state, joint_parameters
+        return verts, skel_state
 
 
 def set_blendshape_parameter_sets(character: pym_geometry.Character) -> None:
