@@ -20,40 +20,6 @@ import open3d as o3d
 
 torch.manual_seed(0)
 
-def visualize_open3d(verts, faces):
-    """
-    verts: (V, 3) torch.Tensor or np.ndarray
-    faces: (F, 3) np.ndarray
-    """
-    if torch.is_tensor(verts):
-        verts = verts.detach().cpu().numpy()
-
-    if torch.is_tensor(faces):
-        faces = faces.detach().cpu().numpy()
-
-    mesh = o3d.geometry.TriangleMesh()
-    mesh.vertices = o3d.utility.Vector3dVector(verts)
-    mesh.triangles = o3d.utility.Vector3iVector(faces.astype("int32"))
-
-    mesh.compute_vertex_normals()
-
-    # Optional but helpful
-    mesh.paint_uniform_color([0.8, 0.7, 0.6])
-    verts_np = verts.detach().cpu().numpy() if torch.is_tensor(verts) else verts
-    center = verts_np.mean(axis=0)
-    frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
-        size=1.0,
-        origin=[0, 0, 0]   # WORLD ORIGIN
-    )
-
-    o3d.visualization.draw_geometries(
-        [mesh, frame],
-        window_name="MHR Mesh",
-        width=1024,
-        height=768,
-        mesh_show_back_face=True
-    )
-
 def mesh_o3d(v, faces, color):
     m = o3d.geometry.TriangleMesh()
     m.vertices = o3d.utility.Vector3dVector(v.detach().cpu().numpy())
@@ -278,7 +244,7 @@ def run():
             local_pose = (pose_indices - 6).tolist()  # shift to 0-129
             print(f"{j_idx:3d} {j_name:25s}: global {pose_indices.tolist()} -> body_pose_params {local_pose}")
 
-    if 1:
+    if 0:
         # === Full sweep: test all 130 body_pose_params slots ===
         # For each slot 0-129: set to 0.3, zero rest, print driven joints, assert non-driven joints stay ~0
         print("\n=== Testing all 130 body_pose_params slots ===")
@@ -326,21 +292,39 @@ def run():
     #################### prepare data
     identity_coeffs, model_parameters, face_expr_coeffs = _prepare_input_data(batch_size=256)
 
-    # [:3]   : translation
-    # [3:6]  : rotation (axis-angle)
-    # [6:]   : pose parameters but im not sure if its all the way from 6 to the end
+    # model_parameters breakdown (0-203, 204 total):
+    # 0-5:      rigid parameters (global translation x,y,z + rotation x,y,z in axis-angle)
+    # 6-135:    pose parameters (130 body joint angles in axis-angle, local to parent)
+    # 136-203:  scale parameters (68 mesh deformation/scaling values)
     print(f"model_parameters.shape: {model_parameters.shape}")  # [256, 204]
     
     #################### forward pass
     # See: file:///home/haziq/sam-3d-body/sam_3d_body/models/heads/mhr_head.py
+    
+    # Test: zero out left arm/hand and left leg chains (no rotation from shoulder/hip onwards)
+    # Left arm in body_pose_params: 34-43 (l_clavicle through l_wrist)
+    # Left hand in body_pose_params: 89-115 (l_thumb0 through l_middle1)
+    # Left leg in body_pose_params: 53-61 (l_upleg through l_ball), 116-119 (extra foot)
+    # Shared params: 126-127 (shoulder/forearm twist), 128-129 (hip/knee twist)
+    # In model_parameters: add 6 to body_pose_params indices
+    mp_left_zero = model_parameters.clone()
+    mp_left_zero[:, 40:50]      = 0 # left arm (body_pose_params 34-43 + 6)
+    mp_left_zero[:, 95:122]     = 0 # left hand (body_pose_params 89-115 + 6)
+    mp_left_zero[:, 59:68]      = 0 # left leg (body_pose_params 53-61 + 6)
+    mp_left_zero[:, 122:126]    = 0 # left foot extra (body_pose_params 116-119 + 6)
+    mp_left_zero[:, 132:136]    = 0 # shared shoulder/forearm/hip/knee twist (126-129 + 6)
+    
     with torch.no_grad():
-        verts, skel_state = mhr_model(identity_coeffs, model_parameters, face_expr_coeffs)
-        verts = verts / 100
-        joint_parameters = mhr_model.character_torch.skeleton.skeleton_state_to_joint_parameters(skel_state)
+        v_zero, _ = mhr_model(identity_coeffs, mp_left_zero, face_expr_coeffs)
+        v_normal, _ = mhr_model(identity_coeffs, model_parameters, face_expr_coeffs)
+        v_zero = v_zero / 100
+        v_normal = v_normal / 100
 
-    # visualize open3d
     idx = 132
-    visualize_open3d(verts[idx], faces)
+    m_zero = mesh_o3d(v_zero[idx], faces, [1, 0, 0])    # red - left arm zeroed
+    m_normal = mesh_o3d(v_normal[idx], faces, [0, 1, 0])  # green - normal pose
+    frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0,0,0])
+    o3d.visualization.draw_geometries([m_zero, m_normal, frame], mesh_show_back_face=True)
 
     #################### numerical sanity check
     model_parameters[:, :3]     = torch.tensor([0., 0., 0.])        # set translation to 0
