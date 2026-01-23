@@ -439,7 +439,7 @@ class MHR(torch.nn.Module):
         # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
         # Export a scripted MHR model wrapper and verify consistency  #
         # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-        if 1:
+        if 0:
 
             # Export a scripted MHR model wrapper and verify consistency by using the same inputs to the original MHR model
             mhr_model_v2 = torch.jit.load("mhr_model_v2.pt")
