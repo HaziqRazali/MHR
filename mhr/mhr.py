@@ -394,13 +394,25 @@ class MHR(torch.nn.Module):
         # Accounts for entire parent chain hierarchy via FK
 
         if 1:
-            
+
             # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
             # Debug prints to create a mapping from skel_state to joint_parameters  #
             # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
             # Inspect skeleton and extract hardcode-friendly lists for a scripted wrapper
             s = self.character_torch.skeleton
+            np.savez("mhr_rig.npz",
+                    parents=s.joint_parents.cpu().numpy(),
+                    prerot=s.joint_prerotations.cpu().numpy(),
+                    offsets=s.joint_translation_offsets.cpu().numpy())
+
+            # path to the NPZ saved earlier
+            npz = np.load("mhr_rig.npz")
+            device = skel_state.device
+            parents = torch.from_numpy(npz["parents"]).long().to(device)
+            prerot = torch.from_numpy(npz["prerot"]).to(device).to(torch.float32)  # shape [J,4]
+            offsets = torch.from_numpy(npz["offsets"]).to(device).to(torch.float32)  # shape [J,3]
+
             jp = skel_state_to_joint_parameters(skel_state, s.joint_parents, prerot=s.joint_prerotations, offsets=s.joint_translation_offsets)
             diff_jp = (jp - joint_parameters).abs().max().item()
             print("max |jp - joint_parameters| =", diff_jp)
@@ -411,7 +423,7 @@ class MHR(torch.nn.Module):
             print("max |ss - skel_state| =", diff_ss)
             assert diff_ss < 1e-3, f"skel_state mismatch (max {diff_ss})"
 
-            jp = skel_state_to_joint_parameters(ss, s.joint_parents, prerot=s.joint_prerotations, offsets=s.joint_translation_offsets)        
+            jp = skel_state_to_joint_parameters(ss, parents, prerot=prerot, offsets=offsets)        
             diff_jp = (jp - joint_parameters).abs().max().item()
             print("max |jp - joint_parameters| =", diff_jp)
             assert diff_jp < 1e-3, f"joint params mismatch (max {diff_jp})"
@@ -420,6 +432,9 @@ class MHR(torch.nn.Module):
             diff_ss = (ss - skel_state).abs().max().item()
             print("max |ss - skel_state| =", diff_ss)
             assert diff_ss < 1e-3, f"skel_state mismatch (max {diff_ss})"
+
+            print(f"Debug mapping from skel_state to joint_parameters successful, exiting.")
+            sys.exit()
             
             # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
             # Debug prints to create a mapping from skel_state to joint_parameters  #
