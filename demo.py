@@ -299,6 +299,7 @@ def run():
     print(f"model_parameters.shape: {model_parameters.shape}")  # [256, 204]
     
     #################### forward pass
+    print(f"Sanity check: zero out left arm/hand and left leg chains")
     # See: file:///home/haziq/sam-3d-body/sam_3d_body/MHR/mhr.py
     # See: file:///home/haziq/sam-3d-body/sam_3d_body/models/heads/mhr_head.py
     
@@ -326,18 +327,23 @@ def run():
     m_normal = mesh_o3d(v_normal[idx], faces, [0, 1, 0])  # green - normal pose
     frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0,0,0])
     o3d.visualization.draw_geometries([m_zero, m_normal, frame], mesh_show_back_face=True)
+    input("Press Enter to continue...")
 
     #################### numerical sanity check
+    print(f"Sanity check: model shifted by translation of 1000000")
     model_parameters[:, :3]     = torch.tensor([0., 0., 0.])        # set translation to 0
     model_parameters[:, 3:6]    = torch.tensor([0., 0., 0.])        # set rotation to 0
     v0, _ = mhr_model(identity_coeffs, model_parameters, face_expr_coeffs)
 
-    model_parameters[:, :3]     = torch.tensor([0., 0., 1000000])   # set translation to a large value
+    model_parameters[:, :3]     = torch.tensor([0., 0., 100])       # set translation to a large value
     model_parameters[:, 3:6]    = torch.tensor([0., 0., 0.])        # set rotation to 0
     v1, _ = mhr_model(identity_coeffs, model_parameters, face_expr_coeffs)
-    print((v0 - v1).abs().max())
+    print(f"{(v0 - v1).abs().max()} (should be 100)")
+    print()
 
     #################### visual sanity check
+    print(f"Sanity check: model rotated by 90 degrees about Z axis")
+
     # forward 1
     mp0 = model_parameters.clone()
     mp0[:, :3]  = torch.tensor([0., 0., 10.])  # set translation to 1000
@@ -367,7 +373,8 @@ def run():
 
 def compare_with_torchscript_model():
     print("Comparing MHR model with TorchScripted model.")
-    scripted_model = torch.jit.load("./assets/mhr_model.pt")
+    #scripted_model = torch.jit.load("./assets/mhr_model.pt")
+    scripted_model = torch.jit.load("mhr_model_v2.pt")
     mhr_model = MHR.from_files(device=torch.device("cpu"), lod=1)
 
     batch_size = 128

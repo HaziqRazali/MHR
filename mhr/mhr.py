@@ -14,6 +14,7 @@
 
 
 import os
+import sys
 
 from pathlib import Path
 from typing import Literal
@@ -393,11 +394,10 @@ class MHR(torch.nn.Module):
         #   [7]    : global scale factor
         # Accounts for entire parent chain hierarchy via FK
 
-        if 1:
-
-            # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-            # Debug prints to create a mapping from skel_state to joint_parameters  #
-            # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+        # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+        # Debug prints to create a mapping from skel_state to joint_parameters  #
+        # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+        if 0:
 
             # Inspect skeleton and extract hardcode-friendly lists for a scripted wrapper
             s = self.character_torch.skeleton
@@ -436,10 +436,24 @@ class MHR(torch.nn.Module):
             print(f"Debug mapping from skel_state to joint_parameters successful, exiting.")
             sys.exit()
             
-            # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-            # Debug prints to create a mapping from skel_state to joint_parameters  #
-            # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-        
+        # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+        # Export a scripted MHR model wrapper and verify consistency  #
+        # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+        if 1:
+
+            # Export a scripted MHR model wrapper and verify consistency by using the same inputs to the original MHR model
+            mhr_model_v2 = torch.jit.load("mhr_model_v2.pt")
+            verts_v2, skel_state_v2 = mhr_model_v2(identity_coeffs, model_parameters, face_expr_coeffs)
+            diff_skel = (skel_state_v2 - skel_state).abs().max().item()
+            print("max |skel_state_v2 - skel_state| =", diff_skel)
+            assert diff_skel < 1e-3, f"skel_state mismatch (max {diff_skel})"
+
+            # Also verify skel_state_to_joint_parameters function in the scripted wrapper
+            joint_parameters_v2 = mhr_model_v2.skel_state_to_joint_parameters(skel_state_v2)
+            diff_jp = (joint_parameters_v2 - joint_parameters).abs().max().item()
+            print("max |joint_parameters_v2 - joint_parameters| =", diff_jp)
+            assert diff_jp < 1e-3, f"joint params mismatch (max {diff_jp})"
+
         # Apply pose correctives
         linear_model_unposed = rest_pose
         if apply_correctives:
