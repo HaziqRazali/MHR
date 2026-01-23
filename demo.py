@@ -299,6 +299,7 @@ def run():
     print(f"model_parameters.shape: {model_parameters.shape}")  # [256, 204]
     
     #################### forward pass
+    # See: file:///home/haziq/sam-3d-body/sam_3d_body/MHR/mhr.py
     # See: file:///home/haziq/sam-3d-body/sam_3d_body/models/heads/mhr_head.py
     
     # Test: zero out left arm/hand and left leg chains (no rotation from shoulder/hip onwards)
