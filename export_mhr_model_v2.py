@@ -59,7 +59,7 @@ class MHRWrapper(torch.nn.Module):
 
         return torch.stack([rx, ry, rz], dim=-1)
 
-    def skel_state_to_joint_parameters(self, skel_state):
+    def skeleton_state_to_joint_parameters(self, skel_state):
         
         """
         Convert global skeleton state to flattened joint parameters.
@@ -183,7 +183,7 @@ if __name__ == "__main__":
             return self.traced(identity_coeffs, model_parameters, face_expr_coeffs)
 
         @torch.jit.export
-        def skel_state_to_joint_parameters(self, skel_state: torch.Tensor) -> torch.Tensor:
+        def skeleton_state_to_joint_parameters(self, skel_state: torch.Tensor) -> torch.Tensor:
             # Expect skel_state shape [..., J, 8]
             J = skel_state.size(-2)
             dim8 = skel_state.size(-1)
@@ -288,4 +288,4 @@ if __name__ == "__main__":
     print(f"max vertex diff: {vdiff}")
     print(f"max skel diff: {sdiff}")
 
-    jp = loaded.skel_state_to_joint_parameters(skel_loaded)
+    jp = loaded.skeleton_state_to_joint_parameters(skel_loaded)

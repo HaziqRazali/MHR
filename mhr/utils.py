@@ -18,7 +18,7 @@ import math
 import torch
 
 
-def batch6DFromXYZ(r, return_9D: bool = False) -> torch.Tensor:
+def batch6DFromXYZ(r, return_9D=False) -> torch.Tensor:
     """
     Generate a matrix representing a rotation defined by a XYZ-Euler
     rotation.

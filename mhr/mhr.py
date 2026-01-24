@@ -384,7 +384,15 @@ class MHR(torch.nn.Module):
         #   [3:6]  : local Euler XYZ rotation angles
         #   [-1]   : log2 scale factor
         # These are fed to forward kinematics to compute global skeleton state
-        
+        #print("Joint names:")
+        #for i, name in enumerate(self.character_torch.skeleton.joint_names):
+        #    print(f"{i:3d}: {name}")
+        #print()
+
+        #joint_euler_angles = torch.reshape(joint_parameters,[model_parameters.shape[0], -1, pym_geometry.PARAMETERS_PER_JOINT])[:,:,3:6]
+        #print(joint_euler_angles[0,76])
+        #sys.exit()
+
         skel_state = self.character_torch.joint_parameters_to_skeleton_state(joint_parameters)
         # skel_state: [batch=256, num_joints=127, 8 params per joint]
         # Contains GLOBAL transforms in world/character space (result of forward kinematics)
@@ -440,6 +448,7 @@ class MHR(torch.nn.Module):
         # Export a scripted MHR model wrapper and verify consistency  #
         # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
         if 0:
+            print(f"Calling scripted MHR model wrapper for verification...")
 
             # Export a scripted MHR model wrapper and verify consistency by using the same inputs to the original MHR model
             mhr_model_v2 = torch.jit.load("mhr_model_v2.pt")
@@ -448,11 +457,19 @@ class MHR(torch.nn.Module):
             print("max |skel_state_v2 - skel_state| =", diff_skel)
             assert diff_skel < 1e-3, f"skel_state mismatch (max {diff_skel})"
 
-            # Also verify skel_state_to_joint_parameters function in the scripted wrapper
-            joint_parameters_v2 = mhr_model_v2.skel_state_to_joint_parameters(skel_state_v2)
+            # Also verify skeleton_state_to_joint_parameters function in the scripted wrapper
+            joint_parameters_v2 = mhr_model_v2.skeleton_state_to_joint_parameters(skel_state_v2)
             diff_jp = (joint_parameters_v2 - joint_parameters).abs().max().item()
             print("max |joint_parameters_v2 - joint_parameters| =", diff_jp)
             assert diff_jp < 1e-3, f"joint params mismatch (max {diff_jp})"
+            #joint_parameters_v2 = torch.reshape(joint_parameters_v2,[joint_parameters_v2.shape[0], 127, 7])
+
+            joint_parameters = torch.clone(joint_parameters_v2)
+            joint_parameters = torch.reshape(joint_parameters,[joint_parameters.shape[0], 127, 7])
+            joint_parameters[:,:,3:6] = torch.tensor([0.0, 0.0, 0.0]).to(joint_parameters)  # zero out left forearm rotation
+            joint_parameters[:,76,3:6] = torch.tensor([0.0, 1.57, 0.0]).to(joint_parameters) 
+            joint_parameters = torch.reshape(joint_parameters,[joint_parameters.shape[0], 127*7])
+            skel_state = self.character_torch.joint_parameters_to_skeleton_state(joint_parameters)
 
         # Apply pose correctives
         linear_model_unposed = rest_pose
