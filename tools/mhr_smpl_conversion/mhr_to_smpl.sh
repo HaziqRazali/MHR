@@ -1,5 +1,5 @@
 #!/bin/bash
-# TEST_MODE=0 ./mhr_to_smpl.sh --data-root /media/haziq/Haziq/mocap/data/self | tee mhr_to_smpl.log
+# TEST_MODE=0 ./mhr_to_smpl.sh --data-root /media/haziq/Haziq/mocap/data/self | tee mhr_to_smpl_new.log
 set -euo pipefail
 shopt -s nullglob
 
