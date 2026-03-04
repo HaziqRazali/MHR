@@ -38,8 +38,9 @@ def _prepare_input_data(batch_size: int) -> torch.Tensor:
 def run():
 
     # initialize MHR model
-    mhr_model   = MHR.from_files(device=torch.device("cpu"), lod=1)
-    faces       = mhr_model.character.mesh.faces
+    mhr_model       = MHR.from_files(device=torch.device("cpu"), lod=1)
+    mhr_model_v2    = torch.jit.load("mhr_model_v2.pt", map_location='cpu')
+    faces           = mhr_model.character.mesh.faces
 
     # # # # # # # # #
     # sanity checks #
@@ -298,8 +299,7 @@ def run():
                 print("  (no joints driven by this slot)")
             
             print(f"  Unaffected joints rot sum: {unaffected_rot_sum:.2e} (should be ~0)")
-    #input()
-
+    
     # # # # # # # # # # # # #
     # end of sanity checks  #
     # # # # # # # # # # # # #
@@ -314,6 +314,8 @@ def run():
     print(f"model_parameters.shape: {model_parameters.shape}")  # [256, 204]
     
     #################### forward pass
+    print(f"Sanity check: zero out left arm/hand and left leg chains")
+    # See: file:///home/haziq/sam-3d-body/sam_3d_body/MHR/mhr.py
     # See: file:///home/haziq/sam-3d-body/sam_3d_body/models/heads/mhr_head.py
     
     # Test: zero out left arm/hand and left leg chains (no rotation from shoulder/hip onwards)
@@ -330,28 +332,75 @@ def run():
     mp_left_zero[:, 132:136]    = 0 # shared shoulder/forearm/hip/knee twist (126-129 + 6)
     
     with torch.no_grad():
-        v_zero, _ = mhr_model(identity_coeffs, mp_left_zero, face_expr_coeffs)
-        v_normal, _ = mhr_model(identity_coeffs, model_parameters, face_expr_coeffs)
-        v_zero = v_zero / 100
-        v_normal = v_normal / 100
+        v_zero, skel_state_zero     = mhr_model(identity_coeffs, mp_left_zero, face_expr_coeffs)
+        v_normal, skel_state_normal = mhr_model(identity_coeffs, model_parameters, face_expr_coeffs)
+        v_zero      = v_zero / 100
+        v_normal    = v_normal / 100
 
-    idx = 132
-    m_zero = mesh_o3d(v_zero[idx], faces, [1, 0, 0])    # red - left arm zeroed
-    m_normal = mesh_o3d(v_normal[idx], faces, [0, 1, 0])  # green - normal pose
-    frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0,0,0])
-    o3d.visualization.draw_geometries([m_zero, m_normal, frame], mesh_show_back_face=True)
+        v_zero_v2, skel_state_zero_v2       = mhr_model_v2(identity_coeffs, mp_left_zero, face_expr_coeffs)
+        v_normal_v2, skel_state_normal_v2   = mhr_model_v2(identity_coeffs, model_parameters, face_expr_coeffs)
+        v_zero_v2       = v_zero_v2 / 100
+        v_normal_v2     = v_normal_v2 / 100
+
+    idx         = 132
+    m_zero      = mesh_o3d(v_zero[idx], faces, [1, 0, 0])       # red - left arm zeroed
+    m_zero_v2   = mesh_o3d(v_zero_v2[idx], faces, [0, 0, 1])    # blue - v2 zeroed
+    m_normal    = mesh_o3d(v_normal[idx], faces, [0, 1, 0])     # green - normal pose
+    m_normal_v2 = mesh_o3d(v_normal_v2[idx], faces, [1, 1, 0])  # yellow - v2 normal
+    frame       = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0,0,0])
+    geometries  = [m_zero, m_zero_v2, m_normal, m_normal_v2]
+    for i in range(1, len(geometries) + 1):
+        o3d.visualization.draw_geometries(geometries[:i] + [frame], mesh_show_back_face=True)
+    
+
+    #################### check skeleton state to joint parameters mapping
+    print(f"Checking skeleton_state_to_joint_parameters mapping")
+    
+    joint_parameters_zero   = mhr_model_v2.skeleton_state_to_joint_parameters(skel_state_zero)
+    skel_state_zero_back    = mhr_model.character_torch.joint_parameters_to_skeleton_state(joint_parameters_zero)
+    print(f"Max diff skel_state_zero -> joint_params -> skel_state: "f"{(skel_state_zero_back - skel_state_zero).abs().max()}")
+    joint_parameters_normal = mhr_model_v2.skeleton_state_to_joint_parameters(skel_state_normal)
+    skel_state_normal_back  = mhr_model.character_torch.joint_parameters_to_skeleton_state(joint_parameters_normal)
+    print(f"Max diff skel_state_normal -> joint_params -> skel_state: "f"{(skel_state_normal_back - skel_state_normal).abs().max()}")
+    print() 
+
+    # inspect joint parameters
+    euler_angles_zero = joint_parameters_zero.view(-1, 127, 7)[:, :, 3:6]  # [B, 127, 3]
+    print(euler_angles_zero[0, 75, :])  # print first sample
+    euler_angles_normal = joint_parameters_normal.view(-1, 127, 7)[:, :, 3:6]  # [B, 127, 3]
+    print(euler_angles_normal[0, 75, :])  # print first sample
+    sys.exit()
 
     #################### numerical sanity check
+    print(f"Sanity check: model shifted by translation")
     model_parameters[:, :3]     = torch.tensor([0., 0., 0.])        # set translation to 0
     model_parameters[:, 3:6]    = torch.tensor([0., 0., 0.])        # set rotation to 0
-    v0, _ = mhr_model(identity_coeffs, model_parameters, face_expr_coeffs)
+    vertex0, _ = mhr_model(identity_coeffs, model_parameters, face_expr_coeffs)
 
-    model_parameters[:, :3]     = torch.tensor([0., 0., 1000000])   # set translation to a large value
+    model_parameters[:, :3]     = torch.tensor([0., 0., 100])       # set translation to a large value
     model_parameters[:, 3:6]    = torch.tensor([0., 0., 0.])        # set rotation to 0
-    v1, _ = mhr_model(identity_coeffs, model_parameters, face_expr_coeffs)
-    print((v0 - v1).abs().max())
+    vertex1, _ = mhr_model(identity_coeffs, model_parameters, face_expr_coeffs)
+    print(f"{(vertex0 - vertex1).abs().max()} (should be 100)")
+    print()
+
+    print(f"Sanity check with mhr_model_v2: model shifted by translation of 100")
+    model_parameters[:, :3]     = torch.tensor([0., 0., 0.])        # set translation to 0
+    model_parameters[:, 3:6]    = torch.tensor([0., 0., 0.])        # set rotation to 0
+    vertex0_v2, _ = mhr_model_v2(identity_coeffs, model_parameters, face_expr_coeffs)
+
+    model_parameters[:, :3]     = torch.tensor([0., 0., 100])       # set translation to a large value
+    model_parameters[:, 3:6]    = torch.tensor([0., 0., 0.])        # set rotation to 0
+    vertex1_v2, _ = mhr_model_v2(identity_coeffs, model_parameters, face_expr_coeffs)
+    print(f"{(vertex0_v2 - vertex1_v2).abs().max()} (should be 100)")
+    print()
+
+    print(f"{(vertex0 - vertex0_v2).abs().max()} (should be 0)")
+    print(f"{(vertex1 - vertex1_v2).abs().max()} (should be 0)")
+    print()
 
     #################### visual sanity check
+    print(f"Sanity check: model rotated by 90 degrees about Z axis")
+
     # forward 1
     mp0 = model_parameters.clone()
     mp0[:, :3]  = torch.tensor([0., 0., 10.])  # set translation to 1000
@@ -375,14 +424,12 @@ def run():
     o3d.visualization.draw_geometries([m0, m1, frame], mesh_show_back_face=True)
     np.save("faces.npy", faces)
 
-    # mesh = trimesh.Trimesh(vertices=verts[0].numpy(), faces=mhr_model.character.mesh.faces, process=False)
-    # output_mesh_path = "./test.ply"
-    # mesh.export(output_mesh_path)
-    # print(f"Saved example MHR mesh to {output_mesh_path}")
+    #################### mapping sanity check
 
 def compare_with_torchscript_model():
     print("Comparing MHR model with TorchScripted model.")
-    scripted_model = torch.jit.load("./assets/mhr_model.pt")
+    #scripted_model = torch.jit.load("./assets/mhr_model.pt")
+    scripted_model = torch.jit.load("mhr_model_v2.pt")
     mhr_model = MHR.from_files(device=torch.device("cpu"), lod=1)
 
     batch_size = 128

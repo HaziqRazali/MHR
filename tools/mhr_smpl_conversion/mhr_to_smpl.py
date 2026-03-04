@@ -101,6 +101,17 @@ def find_smplx_path():
             return p
     return None
 
+def scatter_to_full(tensor_good, good_idx, T_full):
+    """Scatter [T_good,...] tensor back to [T_full,...] with NaNs elsewhere."""
+    full = torch.full(
+        (T_full, *tensor_good.shape[1:]),
+        float("nan"),
+        device=tensor_good.device,
+        dtype=tensor_good.dtype,
+    )
+    full[torch.as_tensor(good_idx, device=tensor_good.device)] = tensor_good
+    return full
+
 # ------------------------------------------------------------
 # Main
 # ------------------------------------------------------------
@@ -196,21 +207,6 @@ def main():
         raise KeyError(f"Expected key 'vertices' in {args.mhr_path}, got keys: {data.files}")
     verts_mhr = data["vertices"]
 
-    if not np.isfinite(verts_mhr).all():
-        bad = ~np.isfinite(verts_mhr)
-
-        if verts_mhr.ndim == 3:  # [T, V, 3]
-            bad_frames = np.where(bad.any(axis=(1, 2)))[0]
-            print(
-                f"[WARN][NaN/Inf] Found invalid vertices in {args.mhr_path} "
-                f"at frames: {bad_frames[:20].tolist()} "
-                f"(showing first 20, total={len(bad_frames)})"
-            )
-        else:
-            print(
-                f"[WARN][NaN/Inf] Found invalid vertices in single-frame input {args.mhr_path}"
-            )
-
     # ✅ NEW: support both [T,V,3] and single-frame [V,3]
     if verts_mhr.ndim == 2 and verts_mhr.shape[-1] == 3:
         # Single timestep case: [V,3] -> [1,V,3]
@@ -225,11 +221,33 @@ def main():
         print("num_frames:", T)
 
     # ------------------------------------------------------------
+    # 2.5) Identify valid frames and keep only those for optimization
+    # ------------------------------------------------------------
+    T_full = T  # full length we want to save later
+
+    good_mask = np.isfinite(verts_mhr).all(axis=(1, 2))   # [T]
+    good_idx = np.where(good_mask)[0]
+    bad_idx  = np.where(~good_mask)[0]
+
+    print(f"[INFO] total_frames={T_full} good={len(good_idx)} bad={len(bad_idx)}")
+    if len(bad_idx) > 0:
+        print(f"[WARN] bad frames (first 20): {bad_idx[:20].tolist()}")
+
+    if len(good_idx) == 0:
+        raise RuntimeError("All frames contain NaNs/Infs — nothing to optimize.")
+
+    # ⬇️ THIS is what goes into the optimizer
+    verts_opt = verts_mhr[good_idx]   # [T_good, V, 3]
+    T = verts_opt.shape[0]            # overwrite T to mean T_good from here on
+
+    # ------------------------------------------------------------
     # 3) Convert MHR -> SMPL-X params (PCA hands)
     # ------------------------------------------------------------
     smplx_results = converter.convert_mhr2smpl(
-        mhr_vertices=verts_mhr * float(args.scale),
+        mhr_vertices=verts_opt * float(args.scale),
         return_smpl_parameters=True,
+        single_identity=True,
+        is_tracking=True,
     )
 
     smplx_params = smplx_results.result_parameters
@@ -328,16 +346,16 @@ def main():
         expr_T = torch.zeros((T, 10), device=device)
 
     json_data = {
-        "transl":          to_list(smplx_params["transl"]),
-        "global_orient":   to_list(global_R),
-        "body_pose":       to_list(body_R),
-        "betas":           to_list(betas_T),
-        "left_hand_pose":  to_list(left_R),
-        "right_hand_pose": to_list(right_R),
-        "jaw_pose":        to_list(jaw_R),
-        "leye_pose":       to_list(leye_R),
-        "reye_pose":       to_list(reye_R),
-        "expression":      to_list(expr_T),
+        "transl":          to_list(scatter_to_full(smplx_params["transl"], good_idx, T_full)),
+        "global_orient":   to_list(scatter_to_full(global_R, good_idx, T_full)),
+        "body_pose":       to_list(scatter_to_full(body_R, good_idx, T_full)),
+        "betas":           to_list(scatter_to_full(betas_T, good_idx, T_full)),
+        "left_hand_pose":  to_list(scatter_to_full(left_R, good_idx, T_full)),
+        "right_hand_pose": to_list(scatter_to_full(right_R, good_idx, T_full)),
+        "jaw_pose":        to_list(scatter_to_full(jaw_R, good_idx, T_full)),
+        "leye_pose":       to_list(scatter_to_full(leye_R, good_idx, T_full)),
+        "reye_pose":       to_list(scatter_to_full(reye_R, good_idx, T_full)),
+        "expression":      to_list(scatter_to_full(expr_T, good_idx, T_full)),
     }
 
     # ------------------------------------------------------------
@@ -388,7 +406,6 @@ def main():
         cv2.imshow("smplx", image)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
-
 
 if __name__ == "__main__":
     main()
