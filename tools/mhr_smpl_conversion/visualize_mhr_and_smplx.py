@@ -13,11 +13,21 @@
 #   [136:204] zeros  — scale params (68)
 #   See: file:///home/haziq/MHR/demo.py
 #
+# Two NPZ formats are supported:
+#
+#   sam-3d-body format (single frame):
+#     body_pose_params (133,)  — 130 body joint angles
+#
+#   fit3d / dataset format (multi-frame):
+#     param_lbs_model_params  (T, 204) — full model params per frame
+#     param_identity_coeffs   (T, 45)  — shape params per frame
+#     param_face_expr_coeffs  (T, 72)  — expression params per frame
+#     vertices                (T, V, 3) — pre-computed vertices (unused here)
+#     Use --frame to select a frame (default 0).
+#
 # Usage:
-#   python visualize_mhr_and_smplx.py --npz results/img.npz
-#   python visualize_mhr_and_smplx.py --npz results/img.npz --show_axes
-#   python visualize_mhr_and_smplx.py --npz results/img.npz --convert_smplx
-#   python visualize_mhr_and_smplx.py --npz results/img.npz --convert_smplx --device cuda
+#   python /home/haziq/MHR/tools/mhr_smpl_conversion/visualize_mhr_and_smplx.py --npz /home/haziq/sam-3d-body/example_data/results/img.npz --show_axes --convert_smplx
+#   python /home/haziq/MHR/tools/mhr_smpl_conversion/visualize_mhr_and_smplx.py --npz /home/haziq/datasets/mocap/data/fit3d/train/s03/mhr/band_pull_apart.npz --frame 100 --show_axes --convert_smplx
 
 import argparse
 import os
@@ -26,6 +36,7 @@ import sys
 import numpy as np
 import open3d as o3d
 import torch
+from scipy.spatial.transform import Rotation as ScipyR
 
 from mhr.mhr import MHR
 # file:///home/haziq/MHR/mhr/mhr.py
@@ -341,6 +352,81 @@ def convert_mhr_to_smplx(verts_m: np.ndarray, mhr_model, device, smplx_path: str
     return smplx_verts_m, smplx_faces, smplx_joints_m, amass_params
 
 
+# MHR → SMPLX matched joint pairs used for orientation comparison
+_MATCHED_PAIRS = [
+    # (mhr_idx, mhr_name,    smplx_idx, smplx_name)
+    (1,  "root",      0,  "pelvis"),
+    (2,  "l_upleg",   1,  "left_hip"),
+    (18, "r_upleg",   2,  "right_hip"),
+    (3,  "l_lowleg",  4,  "left_knee"),
+    (19, "r_lowleg",  5,  "right_knee"),
+    (37, "c_spine3",  9,  "spine3"),
+    (8,  "l_ball",    10, "left_foot"),
+    (24, "r_ball",    11, "right_foot"),
+    (75, "l_uparm",   16, "left_shoulder"),
+    (39, "r_uparm",   17, "right_shoulder"),
+    (76, "l_lowarm",  18, "left_elbow"),
+    (40, "r_lowarm",  19, "right_elbow"),
+]
+
+# Fixed SMPL-X kinematic tree for the first 22 body joints
+_SMPLX_PARENTS_22 = [-1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 12, 13, 14, 16, 17, 18, 19]
+
+
+def _smplx_global_rots(root_orient_aa, body_pose_aa):
+    """Chain SMPL-X local axis-angles into global rotations for the 22 body joints.
+    root_orient_aa : (1, 3) or (3,)  numpy, axis-angle
+    body_pose_aa   : (1, 63) or (63,) numpy, 21 × 3 axis-angle
+    Returns list of 22 ScipyR objects (global orientations in world space).
+    """
+    root_aa = np.asarray(root_orient_aa).reshape(3)
+    body_aa = np.asarray(body_pose_aa).reshape(63)
+    n = len(_SMPLX_PARENTS_22)
+    local = [ScipyR.from_rotvec(root_aa)]
+    for i in range(1, n):
+        local.append(ScipyR.from_rotvec(body_aa[(i - 1) * 3: i * 3]))
+    global_rots = [None] * n
+    global_rots[0] = local[0]
+    for i in range(1, n):
+        global_rots[i] = global_rots[_SMPLX_PARENTS_22[i]] * local[i]
+    return global_rots
+
+
+def print_global_orient_comparison(mhr_skel_np, smplx_amass_params):
+    """Print a table comparing MHR vs SMPL-X global joint orientations for the
+    same physical pose (after MHR→SMPL-X mesh conversion gave a perfect match).
+    mhr_skel_np     : (127, 8) — skel_state[:,3:7] = xyzw quaternions in world space
+    smplx_amass_params : dict with 'root_orient' (1,3) and 'pose_body' (1,63)
+    """
+    smplx_global = _smplx_global_rots(
+        smplx_amass_params["root_orient"],
+        smplx_amass_params["pose_body"],
+    )
+
+    W = 118
+    print()
+    print("=" * W)
+    print("GLOBAL JOINT ORIENTATIONS — same physical pose  (MHR raw vs converted SMPL-X)")
+    print("If the offset is constant across joints it is purely a local-frame definition difference.")
+    print(f"{'Joint pair':<28} {'MHR global ZYX (deg)':<36} {'SMPLX global ZYX (deg)':<36} {'|diff| (deg)':>12}")
+    print("-" * W)
+    for mi, mn, si, sn in _MATCHED_PAIRS:
+        mhr_rot   = ScipyR.from_quat(mhr_skel_np[mi, 3:7])   # skel stores xyzw
+        smplx_rot = smplx_global[si]
+        mhr_e     = mhr_rot.as_euler("zyx", degrees=True)
+        smplx_e   = smplx_rot.as_euler("zyx", degrees=True)
+        diff_deg  = (smplx_rot * mhr_rot.inv()).magnitude() * 180.0 / np.pi
+        label     = f"{mn} ↔ {sn}"
+        print(f"  {label:<26}  "
+              f"MHR  =[{mhr_e[0]:+7.1f},{mhr_e[1]:+7.1f},{mhr_e[2]:+7.1f}]  "
+              f"SMPLX=[{smplx_e[0]:+7.1f},{smplx_e[1]:+7.1f},{smplx_e[2]:+7.1f}]  "
+              f"diff={diff_deg:7.1f}°")
+    print("=" * W)
+    print("NOTE: If diff is ~constant per joint → pure local-frame offset (fixable with rot_offset).")
+    print("      If diff varies with pose → fundamentally different joint definitions (harder to fix).")
+    print()
+
+
 # ── main ─────────────────────────────────────────────────────────────────────
 
 def main(args):
@@ -348,32 +434,45 @@ def main(args):
     # ── 1. Load NPZ ──────────────────────────────────────────────────────────
     print(f"Loading NPZ: {args.npz}")
     data = np.load(args.npz, allow_pickle=True)
-
-    required = {"body_pose_params"}
-    missing  = required - set(data.files)
-    if missing:
-        print(f"\n[ERROR] NPZ is missing required keys: {missing}")
-        print(  "  → Re-run demo.py to regenerate the NPZ.")
-        sys.exit(1)
-
     print(f"  NPZ keys: {sorted(data.files)}")
 
     device = torch.device(args.device)
 
-    # body_pose_params (133,): 130 body joint angles + 3 jaw (always zero)
-    # file:///home/haziq/sam-3d-body/sam_3d_body/sam_3d_body_estimator.py
-    body_pose = torch.tensor(data["body_pose_params"][:130], dtype=torch.float32)  # (130,)
+    if "body_pose_params" in data.files:
+        # ── sam-3d-body single-frame format ──────────────────────────────────
+        # body_pose_params (133,): 130 body joint angles + 3 jaw (always zero)
+        # file:///home/haziq/sam-3d-body/sam_3d_body/sam_3d_body_estimator.py
+        body_pose = torch.tensor(data["body_pose_params"][:130], dtype=torch.float32)  # (130,)
 
-    # Build model_params (204,) with only body joints, everything else zeroed:
-    #   [0:6]    zeros — global trans (3) + global rot (3)
-    #   [6:136]  body_pose_params[:130]
-    #   [136:204] zeros — scale params (68)
-    model_params = torch.zeros(1, 204, dtype=torch.float32)   # (1, 204)
-    model_params[0, 6:136] = body_pose
+        # Build model_params (204,) with only body joints, everything else zeroed:
+        #   [0:6]    zeros — global trans (3) + global rot (3)
+        #   [6:136]  body_pose_params[:130]
+        #   [136:204] zeros — scale params (68)
+        model_params = torch.zeros(1, 204, dtype=torch.float32)   # (1, 204)
+        model_params[0, 6:136] = body_pose
+        shape_params = torch.zeros(1, 45, dtype=torch.float32)    # (1, 45)
+        expr_params  = torch.zeros(1, 72, dtype=torch.float32)    # (1, 72)
 
-    # Zero shape (identity blendshapes) and expression
-    shape_params = torch.zeros(1, 45,  dtype=torch.float32)   # (1, 45)
-    expr_params  = torch.zeros(1, 72,  dtype=torch.float32)   # (1, 72)
+    elif "param_lbs_model_params" in data.files:
+        # ── fit3d / dataset multi-frame format ───────────────────────────────
+        # param_lbs_model_params (T, 204), param_identity_coeffs (T, 45),
+        # param_face_expr_coeffs (T, 72)
+        T = data["param_lbs_model_params"].shape[0]
+        frame = args.frame
+        print(f"  Sequence length: {T} frames")
+        if frame < 0 or frame >= T:
+            print(f"[ERROR] --frame {frame} is out of range [0, {T - 1}]")
+            sys.exit(1)
+        print(f"  Using frame {frame}")
+        model_params = torch.tensor(data["param_lbs_model_params"][frame:frame+1], dtype=torch.float32)  # (1, 204)
+        shape_params = torch.tensor(data["param_identity_coeffs"][frame:frame+1], dtype=torch.float32)  # (1, 45)
+        expr_params  = torch.tensor(data["param_face_expr_coeffs"][frame:frame+1], dtype=torch.float32) # (1, 72)
+
+    else:
+        print("\n[ERROR] Unrecognised NPZ format.")
+        print("  Expected either 'body_pose_params' (sam-3d-body) or")
+        print("  'param_lbs_model_params' (fit3d/dataset multi-frame).")
+        sys.exit(1)
 
     model_params = model_params.to(device)
     shape_params = shape_params.to(device)
@@ -427,6 +526,9 @@ def main(args):
         )
         print(f"  SMPL-X verts:  {smplx_verts.shape}   range [{smplx_verts.min():.3f}, {smplx_verts.max():.3f}] m")
         print(f"  SMPL-X joints: {smplx_joints_m.shape}")
+
+        # ── Print global orientation comparison ───────────────────────────────
+        print_global_orient_comparison(mhr_skel_np, smplx_amass_params)
 
         # Layout (left → right, gap = body_width + 0.3 m):
         #   LEFT   : MHR mesh + MHR skeleton
@@ -514,16 +616,14 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python visualize_mhr_and_smplx.py --npz /home/haziq/sam-3d-body/example_data/results/img.npz
-  python visualize_mhr_and_smplx.py --npz /home/haziq/sam-3d-body/example_data/results/img.npz --show_axes
-  python visualize_mhr_and_smplx.py --npz /home/haziq/sam-3d-body/example_data/results/img.npz --convert_smplx
   python visualize_mhr_and_smplx.py --npz /home/haziq/sam-3d-body/example_data/results/img.npz --convert_smplx --device cuda
   python visualize_mhr_and_smplx.py --npz /home/haziq/sam-3d-body/example_data/results/img.npz --convert_smplx --smplx_path /path/to/smplx
   python visualize_mhr_and_smplx.py --npz /home/haziq/sam-3d-body/example_data/results/img.npz --convert_smplx --device cuda --save_smplx /home/haziq/sam-3d-body/example_data/results/img_smplx.npz
         """,
     )
-    parser.add_argument("--npz",           required=True,       help="Path to .npz file saved by demo.py")
+    parser.add_argument("--npz",           required=True,       help="Path to .npz file: sam-3d-body single-frame or fit3d multi-frame format")
     parser.add_argument("--device",        default="cpu",       help="Torch device: cpu or cuda (default: cpu)")
+    parser.add_argument("--frame",         type=int, default=0, help="Frame index for multi-frame NPZ files (default: 0)")
     parser.add_argument("--show_axes",     action="store_true", help="Show coordinate frame axes")
     parser.add_argument("--show_spheres",  action="store_true", help="Show skeleton joints as spheres (off by default)")
     parser.add_argument("--no_labels",     action="store_true", help="Hide SMPL-X joint name labels (shown by default)")

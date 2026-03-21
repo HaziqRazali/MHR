@@ -6,7 +6,7 @@
 #
 # Usage (mhr_new env):
 #   python compare_mhr_smplx_joints.py
-#   python compare_mhr_smplx_joints.py --smplx_path /path/to/smplx
+#   python /home/haziq/MHR/tools/mhr_smpl_conversion/map_mhr_smplx_joints.py
 
 import argparse
 import os
@@ -24,17 +24,18 @@ if _MHR_ROOT not in sys.path:
 
 from mhr.mhr import MHR
 
-# ── IK joints from smplx_to_t1.json ─────────────────────────────────────────
+# ── IK joints — matches _JOINT_MAP keys in GMR/scripts_extra/visualize_mhr_rot_offsets.py
 # Maps SMPL-X joint index → name as it appears in the JSON
+# NOTE: ankle = SMPL-X joint 7/8 (NOT 10/11 which are toe tips)
 _SMPLX_IK_JOINTS = {
     0:  "pelvis",
     1:  "left_hip",
     2:  "right_hip",
     4:  "left_knee",
     5:  "right_knee",
+    7:  "left_ankle",
+    8:  "right_ankle",
     9:  "spine3",
-    10: "left_foot",
-    11: "right_foot",
     16: "left_shoulder",
     17: "right_shoulder",
     18: "left_elbow",
