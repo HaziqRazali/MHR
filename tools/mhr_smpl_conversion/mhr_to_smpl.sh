@@ -1,5 +1,5 @@
 #!/bin/bash
-# TEST_MODE=0 ./mhr_to_smpl.sh --data-root /media/haziq/Haziq/mocap/data/self | tee mhr_to_smpl_new.log
+# TEST_MODE=0 FORCE=0 ./mhr_to_smpl.sh --data-root /home/haziq/datasets/mocap/data/laptop_webcam | tee mhr_to_smpl_new.log
 set -euo pipefail
 shopt -s nullglob
 
@@ -10,12 +10,13 @@ shopt -s nullglob
 # ------------------------------------------------------------
 TEST_MODE="${TEST_MODE:-1}"
 DRY_RUN="$TEST_MODE"
+FORCE="${FORCE:-0}"
 
 # ------------------------------------------------------------
 # Defaults (can be overridden)
 # ------------------------------------------------------------
 DEFAULT_DATA_ROOT="/media/haziq/Haziq/mocap/data/kit"
-SCRIPT_PATH="/media/haziq/Haziq/mocap/my_scripts/MHR/tools/mhr_smpl_conversion/mhr_to_smpl.py"
+SCRIPT_PATH="/home/haziq/MHR/tools/mhr_smpl_conversion/mhr_to_smpl.py"
 
 # ------------------------------------------------------------
 # Resolve DATA_ROOT
@@ -54,6 +55,7 @@ echo "MHR → SMPL-X conversion"
 echo "DATA_ROOT : $DATA_ROOT"
 echo "SCRIPT    : $SCRIPT_PATH"
 echo "TEST_MODE : $TEST_MODE"
+echo "FORCE     : $FORCE"
 echo "=============================================="
 
 # ------------------------------------------------------------
@@ -80,11 +82,11 @@ for SPLIT_DIR in "$DATA_ROOT"/train "$DATA_ROOT"/val; do
         [ -d "$SUBJ_DIR" ] || continue
 
         SUBJ_NAME=$(basename "$SUBJ_DIR")
-        MHR_ROOT="$SUBJ_DIR/mhr"
+        MHR_ROOT="$SUBJ_DIR/sam3d"
 
-        # Skip if no mhr directory
+        # Skip if no sam3d directory
         if [ ! -d "$MHR_ROOT" ]; then
-            echo "[SKIP] $SPLIT_NAME/$SUBJ_NAME: no mhr directory"
+            echo "[SKIP] $SPLIT_NAME/$SUBJ_NAME: no sam3d directory"
             continue
         fi
 
@@ -96,7 +98,7 @@ for SPLIT_DIR in "$DATA_ROOT"/train "$DATA_ROOT"/val; do
 
             CAM_NAME=$(basename "$CAM_DIR")
             MHR_DIR="$CAM_DIR"
-            SMPLX_DIR="$SUBJ_DIR/smplx/$CAM_NAME"
+            SMPLX_DIR="$CAM_DIR"
 
             echo "=============================================="
             echo "Processing subject: $SPLIT_NAME/$SUBJ_NAME"
@@ -126,9 +128,14 @@ for SPLIT_DIR in "$DATA_ROOT"/train "$DATA_ROOT"/val; do
                 # Always remove trailing "_mhr_outputs" if present
                 FILE_NAME="${FILE_NAME%_mhr_outputs}"
 
-                OUT_JSON="$SMPLX_DIR/${FILE_NAME}.json"
+                OUT_JSON="$SMPLX_DIR/${FILE_NAME}_smplx.json"
 
                 echo "[RUN] $SPLIT_NAME / $SUBJ_NAME / $CAM_NAME / $FILE_NAME"
+
+                if [[ -f "$OUT_JSON" && "$FORCE" -ne 1 ]]; then
+                    echo "[SKIP] JSON already exists (use FORCE=1 to overwrite): $OUT_JSON"
+                    continue
+                fi
 
                 if [ "$DRY_RUN" -eq 1 ]; then
                     echo "[TEST_MODE] python $SCRIPT_PATH \\"
