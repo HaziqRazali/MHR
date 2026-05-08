@@ -14,6 +14,7 @@
 
 import sys
 import torch
+import numpy as np
 from mhr.mhr import MHR
 import trimesh
 import open3d as o3d
@@ -46,6 +47,7 @@ def run():
     # # # # # # # # #
     
     if 0:
+        # This is the output of the forward pass
         # List all 127 joint names ===
         # Anchors:       0 body_world, 1 root
         # L leg:         2-8 (upleg, lowleg, foot, talocrural, subtalar, transversetarsal, ball) + 9-17 twist procs
@@ -62,32 +64,44 @@ def run():
         sys.exit()
 
     if 0:
-        # Inspect parameter transform object ===
-        # Total params = 321 total parameters across the model
-        # 0-5:      rigid parameters (global translation + rotation)
-        # 6-135:    pose parameters (130 body joint angles)
-        # 136-203:  scale parameters (68 mesh deformation values)
-        # 204-248:  identity blendshapes (45 coefficients)
-        # 249-320:  facial expression blendshapes (72 coefficients)
+        # This is the input to the forward pass
+        # Total params = 321 total parameters across the model (after with_blend_shape())
+        # 0-5:      rigid parameters (global translation + rotation)     [pt.rigid_parameters]
+        # 6-135:    pose parameters (130 body joint angles)               NOTE: pt.pose_parameters spans 0-135 (includes rigid), so use pt.pose_parameters with [:6]=False to isolate body joints
+        # 136-203:  scale parameters (68 mesh deformation values)         [pt.scaling_parameters]
+        # 204-248:  identity blendshapes (45 coefficients)                [pt.blend_shape_parameters, first 45]
+        # 249-320:  facial expression blendshapes (72 coefficients)       [pt.face_expression_parameters]
+        # Ordering of 204-320 is set by set_blendshape_parameter_sets() in mhr/mhr.py
         # In mhr_head.py, body_pose_params refers specifically to indices 6:136 (the 130 joint angles)
         # but the full model_parameters [0:204] is passed to MHR forward
-        # See: mhr/mhr.py and ../sam-3d-body/sam_3d_body/models/heads/mhr_head.py for details
-        param_transform = mhr_model.character.parameter_transform
-        print("Total params:", param_transform.size)
-        print("\nDir of param_transform:")
-        print([attr for attr in dir(param_transform) if not attr.startswith('_')])
+        # See: file:///home/haziq/MHR/mhr/mhr.py (set_blendshape_parameter_sets) for blendshape ordering
+        #      file:///home/haziq/MHR/mhr/mhr.py (MHR.forward) for how model_parameters is padded and consumed
+        #      file:///home/haziq/sam-3d-body/sam_3d_body/models/heads/mhr_head.py (mhr_forward) for usage
+        
+        # param_transform = mhr_model.character.parameter_transform
+        # print("Total params:", param_transform.size)    
+        # Total params: 321
+
+        # print("\nDir of param_transform:")
+        # print([attr for attr in dir(param_transform) if not attr.startswith('_')])
+        # ['add_parameter_set', 'all_parameters', 'apply', 'blend_shape_parameters',
+        #  'face_expression_parameters', 'find_parameters', 'inverse', 'names',
+        #  'no_parameters', 'parameter_sets', 'parameters_for_joints', 'pose_parameters',
+        #  'rigid_parameters', 'scaling_parameters', 'size', 'transform']
+        pass
 
     if 0:
-        # Verify model_parameters → joint_parameters conversion ===
-        # Input: 321-dim parameter vector (the full character state)
+        # This verifies the model_parameters → joint_parameters mapping via FK, confirming the expected parameter breakdown and joint outputs
+        #
+        # Input:    321-dim parameter vector (the full character state)
         # 0-5:      rigid parameters (global translation + rotation)
         # 6-135:    pose parameters (130 body joint angles)
         # 136-203:  scale parameters (68 mesh deformation values)
         # 204-248:  identity blendshapes (45 coefficients)
         # 249-320:  facial expression blendshapes (72 coefficients)
+        #
         # Output: 889-dim joint parameters (127 joints × 7 params per joint)
         # The 7 params per joint = [tx, ty, tz, rot_x, rot_y, rot_z, scale_log2]
-        # This confirms FK pipeline works: model_params → joint_params → skel_state
         # See: mhr/mhr.py
         dummy_input = torch.zeros(1, 321)
         try:
@@ -95,6 +109,7 @@ def run():
             print("\nJoint params shape:", joint_params.shape)  # Should be [1, 889] = 127*7
         except Exception as e:
             print("Error:", e)
+        pass
 
     if 0:
         # Map pose params → joints (130-d body_pose_params only) ===
@@ -407,6 +422,7 @@ def run():
 
     frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0,0,0])
     o3d.visualization.draw_geometries([m0, m1, frame], mesh_show_back_face=True)
+    np.save("faces.npy", faces)
 
     #################### mapping sanity check
 

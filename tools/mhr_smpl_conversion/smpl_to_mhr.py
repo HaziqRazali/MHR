@@ -1,267 +1,323 @@
-import torch
-import json
-import sys
-import numpy as np
-from scipy.spatial.transform import Rotation
+"""Convert SMPL-X JSON → MHR .npz
+
+Usage:
+    pixi run python smpl_to_mhr.py \
+        --smplx_json /home/haziq/datasets/mocap/data/fit3d/train/s03/smplx/band_pull_apart.json \
+        --out_npz    /home/haziq/datasets/mocap/data/fit3d/train/s03/mhr/band_pull_apart.npz
+
+The input JSON is the dataset format produced by mhr_to_smpl.py (or fit3d-style):
+    {
+        "transl":           (T, 3)           float
+        "global_orient":    (T, 1,  3, 3)    rotation matrices
+        "body_pose":        (T, 21, 3, 3)    rotation matrices
+        "betas":            (T, 10)          float
+        "left_hand_pose":   (T, 15, 3, 3)    rotation matrices
+        "right_hand_pose":  (T, 15, 3, 3)    rotation matrices
+        "jaw_pose":         (T, 1,  3, 3)    rotation matrices
+        "leye_pose":        (T, 1,  3, 3)    rotation matrices
+        "reye_pose":        (T, 1,  3, 3)    rotation matrices
+        "expression":       (T, 10)          float
+    }
+
+Output .npz contains:
+    "vertices"  (T, V_mhr, 3)  float32  in **metres** (consistent with MHR dataset convention)
+    "parameters" dict pickled as an object array (optional, via --save_params)
+"""
+
 import argparse
+import json
 import os
+import sys
+
+import numpy as np
+import torch
+import smplx
+from scipy.spatial.transform import Rotation as R
+
 from mhr.mhr import MHR
 from conversion import Conversion
-import smplx
-import trimesh
 
-sys.path.append('/media/haziq/Haziq/mocap/my_scripts/imar_vision_datasets_tools/')
-from util.dataset_util import aa_to_rotmat
 
-# Set headless backend for pyrender
-os.environ['PYOPENGL_PLATFORM'] = 'osmesa'
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-try:
-    import pyrender
-    import imageio
-    PYRENDER_AVAILABLE = True
-except ImportError as e:
-    print(f"pyrender not available: {e}")
-    PYRENDER_AVAILABLE = False
+def find_smplx_path():
+    candidates = [
+        os.path.expanduser("/media/haziq/Haziq/mocap/data/models_smplx_v1_1/models/smplx"),
+        os.path.expanduser("~/datasets/mocap/data/models_smplx_v1_1/models/smplx"),
+    ]
+    for p in candidates:
+        if os.path.isdir(p):
+            return p
+    return None
 
-"""
-python smpl_to_mhr.py \
---smplx_filename /media/haziq/Haziq/mocap/data/fit3d/train/s03/smplx/band_pull_apart.json \
---mhr_filename smpl_to_mhr.npz \
---mhr_video_filename smpl_to_mhr.mp4
-"""
 
-# Parse arguments
-parser = argparse.ArgumentParser(description='Convert SMPLX to MHR and visualize')
-parser.add_argument('--smplx_filename', type=str, required=True, help='Path to SMPLX JSON file')
-parser.add_argument('--mhr_filename', type=str, default='mhr_converted.npz', help='Output filename for MHR parameters (.npz)')
-parser.add_argument('--mhr_video_filename', type=str, default='smplx_mhr_comparison.mp4', help='Output filename for comparison video (.mp4)')
-args = parser.parse_args()
+def rotmat_to_aa(rotmat: np.ndarray) -> np.ndarray:
+    """Convert rotation matrices [..., 3, 3] to axis-angle [..., 3]."""
+    leading = rotmat.shape[:-2]
+    flat = rotmat.reshape(-1, 3, 3)
+    aa = R.from_matrix(flat).as_rotvec()          # (N, 3)
+    return aa.reshape(*leading, 3).astype(np.float32)
 
-# print("Loading sample MHR data for structure reference...")
-# mhr_sample = np.load("/media/haziq/Haziq/mocap/data/fit3d/train/s03/sam3d/60457274/band_pull_apart_mhr_outputs.npz", allow_pickle=True)
-# for k,v in mhr_sample.items():
-#     print(k, v.shape)
-# print()
 
-def rotation_matrix_to_axis_angle(rotmat):
-    # rotmat: [..., 3, 3]
-    shape = rotmat.shape
-    rotmat = rotmat.reshape(-1, 3, 3)
-    aa = []
-    for r in rotmat:
-        r_np = r.cpu().numpy()
-        rot = Rotation.from_matrix(r_np)
-        aa_vec = rot.as_rotvec()
-        aa.append(aa_vec)
-    aa = np.array(aa).reshape(shape[:-2] + (3,))
-    return torch.tensor(aa, device=rotmat.device, dtype=rotmat.dtype)
+def load_json_as_tensors(json_path: str, device: torch.device):
+    """Load SMPL-X JSON and return a dict of float32 tensors on *device*.
 
-# Initialize models
-mhr_model = MHR.from_files(lod=1, device=torch.device("cuda:0"))
-smplx_model = smplx.SMPLX(model_path="/media/haziq/Haziq/mocap/data/models_smplx_v1_1/models/smplx", gender="neutral", use_pca=False)
+    Rotation-matrix fields are converted to axis-angle automatically.
+    """
+    with open(json_path, "r") as f:
+        raw = json.load(f)
 
-# Create converter
-converter = Conversion(
-    mhr_model=mhr_model,
-    smpl_model=smplx_model,
-    method="pytorch"  # or "pymomentum"
-)
-
-smplx_filename = args.smplx_filename
-if smplx_filename.endswith('.json'):
-    smplx_outputs = json.load(open(smplx_filename, "r"))
-elif smplx_filename.endswith('.npz'):
-    smplx_outputs = dict(np.load(smplx_filename, allow_pickle=True))
-else:
-    raise ValueError(f"Unsupported file format: {smplx_filename}. Expected .json or .npz")
-
-if "humaneva" in args.smplx_filename:
-                        
-    #for k, v in world_smplx_params.items():
-    #    if isinstance(v, (np.ndarray, torch.Tensor)):
-    #        print(k, tuple(v.shape))
-    #sys.exit()
-
-    smplx_outputs["transl"]        = smplx_outputs.pop("trans")       # [t, 3]
-    smplx_outputs["global_orient"] = smplx_outputs.pop("root_orient") # [t, 3]
-    smplx_outputs["body_pose"]     = smplx_outputs.pop("pose_body")   # [t, 63]
-    smplx_outputs["betas"]         = smplx_outputs["betas"][:10]      # [3]
-    smplx_outputs["pose_hand"]     = smplx_outputs.pop("pose_hand")
-    smplx_outputs["pose_jaw"]      = smplx_outputs.pop("pose_jaw")
-    smplx_outputs["pose_eye"]      = smplx_outputs.pop("pose_eye")
-
-    # convert to format compatible with the SMPLXHelper
-    num_mocap_frames = smplx_outputs["transl"].shape[0]
-    smplx_outputs["global_orient"] = smplx_outputs["global_orient"][:,None,:]                             # [t, 1, 3]
-    smplx_outputs["global_orient"] = aa_to_rotmat(smplx_outputs["global_orient"])                         # [t, 1, 3, 3]
-    smplx_outputs["body_pose"]     = np.reshape(smplx_outputs["body_pose"],[num_mocap_frames, 21, 3])     # [t, 21 ,3]
-    smplx_outputs["body_pose"]     = aa_to_rotmat(smplx_outputs["body_pose"])                             # [t, 21, 3, 3]
-    smplx_outputs["betas"]         = smplx_outputs["betas"][None,:10].repeat(num_mocap_frames,0)          # [t, 10]
-
-    smplx_params = {
-        'global_orient': torch.tensor(smplx_outputs['global_orient'], device=torch.device("cuda:0"), dtype=torch.float32).squeeze(0),
-        'body_pose': torch.tensor(smplx_outputs['body_pose'], device=torch.device("cuda:0"), dtype=torch.float32).squeeze(0),
-        'betas': torch.tensor(smplx_outputs['betas'], device=torch.device("cuda:0"), dtype=torch.float32).squeeze(0),
+    # Fields that are stored as rotation matrices → axis-angle
+    rotmat_fields = {
+        "global_orient": 1,   # (T, 1,  3, 3) → (T, 3)
+        "body_pose":     21,  # (T, 21, 3, 3) → (T, 63)
+        "left_hand_pose": 15, # (T, 15, 3, 3) → (T, 45)
+        "right_hand_pose": 15,
+        "jaw_pose":      1,
+        "leye_pose":     1,
+        "reye_pose":     1,
     }
-    for key in ['global_orient', 'body_pose']:
-        aa = rotation_matrix_to_axis_angle(smplx_params[key])
-        smplx_params[key] = aa.reshape(aa.shape[0], -1)
-    smplx_params['left_hand_pose']  = torch.zeros((num_mocap_frames, 15*3), device=torch.device("cuda:0"), dtype=torch.float32)
-    smplx_params['right_hand_pose'] = torch.zeros((num_mocap_frames, 15*3), device=torch.device("cuda:0"), dtype=torch.float32)
-    smplx_params['jaw_pose']       = torch.zeros((num_mocap_frames, 3), device=torch.device("cuda:0"), dtype=torch.float32)
-    smplx_params['leye_pose']      = torch.zeros((num_mocap_frames, 3), device=torch.device("cuda:0"), dtype=torch.float32)
-    smplx_params['reye_pose']      = torch.zeros((num_mocap_frames, 3), device=torch.device("cuda:0"), dtype=torch.float32)
-    for k,v in smplx_params.items():
-        print(k, v.shape)
 
-else:
-    smplx_params = {
-        'global_orient': torch.tensor(smplx_outputs['global_orient'], device=torch.device("cuda:0"), dtype=torch.float32).squeeze(0),
-        'body_pose': torch.tensor(smplx_outputs['body_pose'], device=torch.device("cuda:0"), dtype=torch.float32).squeeze(0),
-        'left_hand_pose': torch.tensor(smplx_outputs['left_hand_pose'], device=torch.device("cuda:0"), dtype=torch.float32).squeeze(0),
-        'right_hand_pose': torch.tensor(smplx_outputs['right_hand_pose'], device=torch.device("cuda:0"), dtype=torch.float32).squeeze(0),
-        'jaw_pose': torch.tensor(smplx_outputs['jaw_pose'], device=torch.device("cuda:0"), dtype=torch.float32).squeeze(0),
-        'leye_pose': torch.tensor(smplx_outputs['leye_pose'], device=torch.device("cuda:0"), dtype=torch.float32).squeeze(0),
-        'reye_pose': torch.tensor(smplx_outputs['reye_pose'], device=torch.device("cuda:0"), dtype=torch.float32).squeeze(0),
-        'betas': torch.tensor(smplx_outputs['betas'], device=torch.device("cuda:0"), dtype=torch.float32).squeeze(0),
-    }
-    for key in ['global_orient', 'body_pose', 'left_hand_pose', 'right_hand_pose', 'jaw_pose', 'leye_pose', 'reye_pose']:
-        aa = rotation_matrix_to_axis_angle(smplx_params[key])
-        smplx_params[key] = aa.reshape(aa.shape[0], -1)
-    for k,v in smplx_params.items():
-        print(k, v.shape)
+    params = {}
+    for key, val in raw.items():
+        arr = np.array(val, dtype=np.float64)
 
-#for k,v in smplx_params.items():
-#    smplx_params[k] = v[:10]    # Take only first 10 frames for testing
+        if key in rotmat_fields:
+            # arr shape might be (T, J, 3, 3) or already (T, J*3) / (T, 3)
+            if arr.ndim == 4 and arr.shape[-2:] == (3, 3):
+                aa = rotmat_to_aa(arr)                    # (T, J, 3)
+                arr = aa.reshape(arr.shape[0], -1)        # (T, J*3)
+            # else assume it's already axis-angle — pass through
+        else:
+            arr = arr.astype(np.float32)
 
-# Convert SMPLX to MHR
-results = converter.convert_smpl2mhr(
-    smpl_parameters=smplx_params,
-    single_identity=True,
-    return_mhr_meshes=True,
-    return_mhr_parameters=True,
-    is_tracking=True,
-)
+        params[key] = torch.from_numpy(arr.astype(np.float32)).to(device)
 
-def print_structure(obj, path="", max_depth=3, current_depth=0):
-    if current_depth > max_depth:
-        return
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            shape_info = f" shape={v.shape}" if hasattr(v, 'shape') else ""
-            print(f"{path}.{k}: {type(v).__name__}{shape_info}")
-            if isinstance(v, (dict, list, tuple)) and current_depth < max_depth:
-                print_structure(v, f"{path}.{k}", max_depth, current_depth + 1)
-    elif isinstance(obj, (list, tuple)) and len(obj) > 0:
-        shape_info = f" shape={obj[0].shape}" if hasattr(obj[0], 'shape') else ""
-        print(f"{path}[0]: {type(obj[0]).__name__}{shape_info}")
-        if isinstance(obj[0], (dict, list, tuple)) and current_depth < max_depth:
-            print_structure(obj[0], f"{path}[0]", max_depth, current_depth + 1)
-    else:
-        shape_info = f" shape={obj.shape}" if hasattr(obj, 'shape') else ""
-        print(f"{path}: {type(obj).__name__}{shape_info}")
+    return params
 
-#print("\nRecursive structure:")
-#print_structure(vars(results))
-# see file:///home/haziq/sam-3d-body/sam_3d_body/models/heads/mhr_head.py
-# 204 = [global trans (3), global rot (3), body_pose_params (130), scales (68)]
-# Recursive structure:
-# .result_meshes: list
-# .result_meshes[0]: Trimesh
-# .result_vertices: NoneType
-# .result_parameters: dict
-# .result_parameters.lbs_model_params: Tensor shape=torch.Size([10, 204])
-# .result_parameters.identity_coeffs: Tensor shape=torch.Size([10, 45])
-# .result_parameters.face_expr_coeffs: Tensor shape=torch.Size([10, 72])
-# .result_errors: ndarray shape=(10,)
 
-# Extract MHR parameters
-mhr_params = results.result_parameters
+def to_smplx_vertices(smplx_model, params: dict, batch_size: int = 64) -> torch.Tensor:
+    """Run SMPL-X forward pass in chunks, return (T, V, 3) tensor."""
+    T = params["body_pose"].shape[0]
+    all_verts = []
 
-# Rename and reshape to match format required by mocap_mainloader
-mhr_formatted = {
-    'expr_params': mhr_params['face_expr_coeffs'].detach().cpu().numpy(),
-    'shape_params': mhr_params['identity_coeffs'].detach().cpu().numpy(),
-    'global_trans': mhr_params['lbs_model_params'][:, :3].detach().cpu().numpy(),
-    'global_orient': mhr_params['lbs_model_params'][:, 3:6].detach().cpu().numpy(),
-    'body_pose_params': mhr_params['lbs_model_params'][:, 6:136].detach().cpu().numpy(),
-}
-#for k,v in mhr_formatted.items():
-#    print(k, v.shape)
+    for start in range(0, T, batch_size):
+        end = min(start + batch_size, T)
+        chunk_params = {}
+        for k, v in params.items():
+            chunk_params[k] = v[start:end]
 
-np.savez(args.mhr_filename, **mhr_formatted)
+        # betas broadcast: if stored per-frame, use as-is; if (1,10) repeat
+        if "betas" in chunk_params and chunk_params["betas"].shape[0] == 1 and (end - start) > 1:
+            chunk_params["betas"] = chunk_params["betas"].expand(end - start, -1)
 
-#print(f"MHR parameters saved to {args.mhr_filename}")
+        with torch.no_grad():
+            out = smplx_model(**chunk_params)
+        all_verts.append(out.vertices.cpu())
 
-mhr_model    = torch.jit.load("/home/haziq/MHR/mhr_model_v2.pt", map_location='cpu')
-shape_params = torch.zeros(mhr_formatted['shape_params'].shape[0], 45)
-model_parameters = torch.cat([
-    torch.tensor(mhr_formatted["global_trans"]),
-    torch.tensor(mhr_formatted["global_orient"]),
-    torch.tensor(mhr_formatted["body_pose_params"]),
-    torch.zeros(mhr_formatted['shape_params'].shape[0], 68)
-], dim=1)
-face_expr_coeffs = torch.zeros(mhr_formatted['shape_params'].shape[0], 72)
-mhr_vertices, mhr_faces = mhr_model(shape_params, model_parameters, face_expr_coeffs)
-mhr_vertices *= 0.01
-mhr_mesh_zero_list = []
-for i in range(mhr_vertices.shape[0]):
-    mhr_mesh_zero = trimesh.Trimesh(vertices=mhr_vertices[i].detach().cpu().numpy(), faces=results.result_meshes[0].faces)
-    mhr_mesh_zero_list.append(mhr_mesh_zero)
+    return torch.cat(all_verts, dim=0)  # (T, V, 3)  metres
 
-# Get SMPLX meshes for visualization
-smplx_meshes, _ = converter._smpl_para2mesh(smplx_params, return_mesh=True)
-mhr_meshes = results.result_meshes
 
-# Scale MHR meshes to match SMPLX scale (MHR is in cm, SMPLX in m)
-for mesh in mhr_meshes:
-    mesh.vertices *= 0.01  # Convert cm to m
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
-# Create scene
-scene = pyrender.Scene()
+def main():
+    parser = argparse.ArgumentParser(
+        description="Convert SMPL-X JSON (fit3d format) to MHR .npz",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--smplx_json",
+        type=str,
+        required=True,
+        help="Path to input SMPL-X JSON file.",
+    )
+    parser.add_argument(
+        "--out_npz",
+        type=str,
+        default=None,
+        help="Path to output MHR .npz file. Defaults to same path as input with .npz extension.",
+    )
+    parser.add_argument(
+        "--smplx_path",
+        type=str,
+        default=find_smplx_path(),
+        help="Path to SMPL-X model folder (contains SMPLX_NEUTRAL.pkl / .npz).",
+    )
+    parser.add_argument(
+        "--method",
+        type=str,
+        default="pytorch",
+        choices=["pytorch", "pymomentum"],
+        help="Optimization backend for MHR fitting.",
+    )
+    parser.add_argument(
+        "--single_identity",
+        action="store_true",
+        default=True,
+        help="Use a single shared identity (shape) across all frames.",
+    )
+    parser.add_argument(
+        "--no_single_identity",
+        dest="single_identity",
+        action="store_false",
+        help="Allow per-frame identity (shape) parameters.",
+    )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=64,
+        help="Batch size for SMPL-X forward pass.",
+    )
+    parser.add_argument(
+        "--save_params",
+        action="store_true",
+        default=False,
+        help="Also save MHR parameters (rig params, betas, etc.) in the .npz.",
+    )
+    parser.add_argument(
+        "--gender",
+        type=str,
+        default="neutral",
+        choices=["neutral", "male", "female"],
+        help="SMPL-X model gender.",
+    )
+    args = parser.parse_args()
 
-# Add camera
-camera = pyrender.PerspectiveCamera(yfov=np.pi / 3.0)
-camera_pose = np.eye(4)
-camera_pose[2, 3] = 3  # Move camera back
-scene.add(camera, pose=camera_pose)
+    # ------------------------------------------------------------------
+    # Resolve paths
+    # ------------------------------------------------------------------
+    if args.smplx_path is None:
+        sys.exit("[ERROR] SMPL-X model path not found. Pass --smplx_path explicitly.")
 
-# Add light
-light = pyrender.DirectionalLight(color=np.ones(3), intensity=2.0)
-scene.add(light, pose=camera_pose)
+    if not os.path.isfile(args.smplx_json):
+        sys.exit(f"[ERROR] Input JSON not found: {args.smplx_json}")
 
-# Offscreen renderer
-r = pyrender.OffscreenRenderer(1920, 720)  # Wider for three side-by-side
+    out_npz = args.out_npz
+    if out_npz is None:
+        base = os.path.splitext(args.smplx_json)[0]
+        out_npz = base + "_mhr.npz"
 
-images = []
-num_frames = min(len(smplx_meshes), len(mhr_meshes))
+    os.makedirs(os.path.dirname(os.path.abspath(out_npz)), exist_ok=True)
 
-for i in range(num_frames):
-    # Clear scene
-    scene.clear()
-    scene.add(camera, pose=camera_pose)
-    scene.add(light, pose=camera_pose)
-    
-    # Add SMPLX mesh (left side)
-    smplx_pose = np.eye(4)
-    smplx_pose[0, 3] = -2  # Translate left
-    scene.add(pyrender.Mesh.from_trimesh(smplx_meshes[i]), pose=smplx_pose)
-    
-    # Add MHR mesh (middle)
-    mhr_pose = np.eye(4)
-    mhr_pose[0, 3] = 0  # Center
-    scene.add(pyrender.Mesh.from_trimesh(mhr_meshes[i]), pose=mhr_pose)
-    
-    # Add MHR zero mesh (right side)
-    mhr_zero_pose = np.eye(4)
-    mhr_zero_pose[0, 3] = 2  # Translate right
-    scene.add(pyrender.Mesh.from_trimesh(mhr_mesh_zero_list[i]), pose=mhr_zero_pose)
-    
-    # Render
-    color, _ = r.render(scene)
-    images.append(color)
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    print(f"[INFO] device        : {device}")
+    print(f"[INFO] smplx_json    : {args.smplx_json}")
+    print(f"[INFO] out_npz       : {out_npz}")
+    print(f"[INFO] method        : {args.method}")
+    print(f"[INFO] single_id     : {args.single_identity}")
 
-# Save as video
-imageio.mimsave(args.mhr_video_filename, images, fps=30)
-# print(f"Video saved as {args.mhr_video_filename}")
+    # ------------------------------------------------------------------
+    # 1) Load JSON → axis-angle tensors
+    # ------------------------------------------------------------------
+    print("\n[1/4] Loading SMPL-X JSON ...")
+    params = load_json_as_tensors(args.smplx_json, device)
+    T_full = params["body_pose"].shape[0]
+    print(f"      total frames : {T_full}")
+    for k, v in params.items():
+        print(f"      {k:20s} {tuple(v.shape)}")
+
+    # ------------------------------------------------------------------
+    # 2) Identify valid frames (no NaN/Inf)
+    # ------------------------------------------------------------------
+    valid_mask = torch.ones(T_full, dtype=torch.bool, device=device)
+    for v in params.values():
+        valid_mask &= torch.isfinite(v).all(dim=tuple(range(1, v.ndim)))
+
+    good_idx = torch.where(valid_mask)[0].cpu().numpy()
+    bad_idx  = torch.where(~valid_mask)[0].cpu().numpy()
+    print(f"\n[INFO] good={len(good_idx)}  bad={len(bad_idx)}")
+    if len(bad_idx):
+        print(f"[WARN] bad frames (first 20): {bad_idx[:20].tolist()}")
+
+    if len(good_idx) == 0:
+        sys.exit("[ERROR] All frames contain NaN/Inf — nothing to process.")
+
+    params_good = {k: v[good_idx] for k, v in params.items()}
+    T = len(good_idx)
+
+    # ------------------------------------------------------------------
+    # 3) SMPL-X forward pass → vertices (metres)
+    # ------------------------------------------------------------------
+    print(f"\n[2/4] Running SMPL-X forward pass ({T} frames) ...")
+    smplx_model = smplx.SMPLX(
+        model_path=args.smplx_path,
+        gender=args.gender,
+        use_pca=False,
+        flat_hand_mean=True,
+        num_betas=10,
+        num_expression_coeffs=10,
+    ).to(device)
+
+    smplx_verts = to_smplx_vertices(smplx_model, params_good, batch_size=args.batch_size)
+    # smplx_verts: (T, 10475, 3)  in metres
+    print(f"      SMPL-X vertices shape : {tuple(smplx_verts.shape)}")
+
+    # ------------------------------------------------------------------
+    # 4) Convert SMPL-X vertices → MHR
+    # ------------------------------------------------------------------
+    print(f"\n[3/4] Converting to MHR (method={args.method}) ...")
+    mhr_model = MHR.from_files(lod=1, device=device)
+    converter = Conversion(
+        mhr_model=mhr_model,
+        smpl_model=smplx_model,
+        method=args.method,
+    )
+
+    # Conversion class expects vertices in metres; internally converts to cm.
+    conversion_result = converter.convert_smpl2mhr(
+        smpl_vertices=smplx_verts.to(device),
+        smpl_parameters=None,
+        single_identity=args.single_identity,
+        return_mhr_meshes=False,
+        return_mhr_vertices=True,
+        return_mhr_parameters=args.save_params,
+        return_fitting_errors=True,
+    )
+
+    mhr_verts_cm = conversion_result.result_vertices  # (T, V_mhr, 3) in cm
+    if isinstance(mhr_verts_cm, torch.Tensor):
+        mhr_verts_cm = mhr_verts_cm.detach().cpu().numpy()
+    elif isinstance(mhr_verts_cm, list):
+        mhr_verts_cm = np.stack([
+            v.detach().cpu().numpy() if torch.is_tensor(v) else np.asarray(v)
+            for v in mhr_verts_cm
+        ], axis=0)
+
+    mhr_verts_m = (mhr_verts_cm / 100.0).astype(np.float32)  # → metres
+
+    print(f"      MHR vertices shape : {mhr_verts_m.shape}")
+    if conversion_result.result_errors is not None:
+        errs = conversion_result.result_errors
+        if hasattr(errs, "__len__") and len(errs):
+            errs_np = np.asarray(errs)
+            print(f"      Fitting error (cm) — mean={errs_np.mean():.4f}  max={errs_np.max():.4f}")
+
+    # ------------------------------------------------------------------
+    # 5) Scatter back to T_full with NaNs for bad frames
+    # ------------------------------------------------------------------
+    full_verts = np.full((T_full, *mhr_verts_m.shape[1:]), np.nan, dtype=np.float32)
+    full_verts[good_idx] = mhr_verts_m
+
+    # ------------------------------------------------------------------
+    # 6) Save .npz
+    # ------------------------------------------------------------------
+    print(f"\n[4/4] Saving → {out_npz}")
+    save_dict = {"vertices": full_verts}
+
+    if args.save_params and conversion_result.result_parameters is not None:
+        mhr_params = conversion_result.result_parameters
+        for k, v in mhr_params.items():
+            arr = v.detach().cpu().numpy() if torch.is_tensor(v) else np.asarray(v)
+            save_dict[f"param_{k}"] = arr.astype(np.float32)
+
+    np.savez_compressed(out_npz, **save_dict)
+    print(f"\n✅ Done. Saved {T_full} frames ({len(good_idx)} valid) to: {out_npz}")
+    print(f"   vertices  : {full_verts.shape}  dtype={full_verts.dtype}  (metres)")
+
+
+if __name__ == "__main__":
+    main()

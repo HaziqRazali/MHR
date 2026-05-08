@@ -1,8 +1,8 @@
 [project]
 authors = [{name = "MHR Contributors"}]
-dependencies = ["torch", "trimesh>=4.8.3,<5"]
+dependencies = ["torch", "trimesh>=4.8.3,<5", "smplx>=0.1.28,<0.2"]
 name = "mhr"
-requires-python = ">= 3.11"
+requires-python = ">= 3.10"
 dynamic = ["version"]
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -53,6 +53,7 @@ hatch-vcs = "*"
 
 [tool.pixi.dependencies]
 pymomentum = ">=0.1.90"
+scikit-learn = ">=1.8.0,<2"
 
 [tool.pixi.feature.py312.dependencies]
 python = "3.12.*"
