@@ -1,0 +1,77 @@
+==============================================
+MHR → SMPL-X conversion
+DATA_ROOT : /media/haziq/Haziq/mocap/data/self
+SCRIPT    : /media/haziq/Haziq/mocap/my_scripts/MHR/tools/mhr_smpl_conversion/mhr_to_smpl.py
+TEST_MODE : 0
+==============================================
+
+==============================================
+Processing split: train
+Split dir: /media/haziq/Haziq/mocap/data/self/train
+==============================================
+==============================================
+Processing subject: train/haziq
+Camera:    laptop_webcam
+MHR dir:   /media/haziq/Haziq/mocap/data/self/train/haziq/mhr/laptop_webcam
+SMPLX dir: /media/haziq/Haziq/mocap/data/self/train/haziq/smplx/laptop_webcam
+==============================================
+[RUN] train / haziq / laptop_webcam / 20260104_001543
+['vertices', 'pred_pose_raw', 'pred_cam_t', 'pred_joint_coords', 'pred_keypoints_3d', 'pred_keypoints_2d', 'bbox', 'focal_length', 'global_rot', 'body_pose_params', 'hand_pose_params', 'scale_params', 'shape_params', 'expr_params', 'pred_global_rots', 'lhand_bbox', 'rhand_bbox', 'frame_indices', 'meta']
+[RUN] train / haziq / laptop_webcam / 20260104_002401
+['vertices', 'pred_pose_raw', 'pred_cam_t', 'pred_joint_coords', 'pred_keypoints_3d', 'pred_keypoints_2d', 'bbox', 'focal_length', 'global_rot', 'body_pose_params', 'hand_pose_params', 'scale_params', 'shape_params', 'expr_params', 'pred_global_rots', 'lhand_bbox', 'rhand_bbox', 'frame_indices', 'meta']
+[RUN] train / haziq / laptop_webcam / 20260104_002705
+['vertices', 'pred_pose_raw', 'pred_cam_t', 'pred_joint_coords', 'pred_keypoints_3d', 'pred_keypoints_2d', 'bbox', 'focal_length', 'global_rot', 'body_pose_params', 'hand_pose_params', 'scale_params', 'shape_params', 'expr_params', 'pred_global_rots', 'lhand_bbox', 'rhand_bbox', 'frame_indices', 'meta']
+[WARN][NaN/Inf] Found invalid vertices in /media/haziq/Haziq/mocap/data/self/train/haziq/mhr/laptop_webcam/20260104_002705_mhr_outputs.npz at frames: [36, 115, 117, 120, 125, 127, 130, 131, 132, 133, 227, 231] (showing first 20, total=12)
+/media/haziq/Haziq/mocap/data/self/train/haziq/mhr/laptop_webcam/20260104_002705_mhr_outputs.npz [NaN after convert] global_orient shape=(245, 3)
+/media/haziq/Haziq/mocap/data/self/train/haziq/mhr/laptop_webcam/20260104_002705_mhr_outputs.npz [NaN after convert] transl shape=(245, 3)
+/media/haziq/Haziq/mocap/data/self/train/haziq/mhr/laptop_webcam/20260104_002705_mhr_outputs.npz [NaN after convert] body_pose shape=(245, 63)
+/media/haziq/Haziq/mocap/data/self/train/haziq/mhr/laptop_webcam/20260104_002705_mhr_outputs.npz [NaN after convert] betas shape=(245, 10)
+/media/haziq/Haziq/mocap/data/self/train/haziq/mhr/laptop_webcam/20260104_002705_mhr_outputs.npz [NaN after convert] left_hand_pose shape=(245, 6)
+/media/haziq/Haziq/mocap/data/self/train/haziq/mhr/laptop_webcam/20260104_002705_mhr_outputs.npz [NaN after convert] right_hand_pose shape=(245, 6)
+/media/haziq/Haziq/mocap/data/self/train/haziq/mhr/laptop_webcam/20260104_002705_mhr_outputs.npz [NaN after convert] expression shape=(245, 10)
+[RUN] train / haziq / laptop_webcam / 20260104_002750
+['vertices', 'pred_pose_raw', 'pred_cam_t', 'pred_joint_coords', 'pred_keypoints_3d', 'pred_keypoints_2d', 'bbox', 'focal_length', 'global_rot', 'body_pose_params', 'hand_pose_params', 'scale_params', 'shape_params', 'expr_params', 'pred_global_rots', 'lhand_bbox', 'rhand_bbox', 'frame_indices', 'meta']
+[WARN][NaN/Inf] Found invalid vertices in /media/haziq/Haziq/mocap/data/self/train/haziq/mhr/laptop_webcam/20260104_002750_mhr_outputs.npz at frames: [557, 690] (showing first 20, total=2)
+/media/haziq/Haziq/mocap/data/self/train/haziq/mhr/laptop_webcam/20260104_002750_mhr_outputs.npz [NaN after convert] global_orient shape=(692, 3)
+/media/haziq/Haziq/mocap/data/self/train/haziq/mhr/laptop_webcam/20260104_002750_mhr_outputs.npz [NaN after convert] transl shape=(692, 3)
+/media/haziq/Haziq/mocap/data/self/train/haziq/mhr/laptop_webcam/20260104_002750_mhr_outputs.npz [NaN after convert] body_pose shape=(692, 63)
+/media/haziq/Haziq/mocap/data/self/train/haziq/mhr/laptop_webcam/20260104_002750_mhr_outputs.npz [NaN after convert] betas shape=(692, 10)
+/media/haziq/Haziq/mocap/data/self/train/haziq/mhr/laptop_webcam/20260104_002750_mhr_outputs.npz [NaN after convert] left_hand_pose shape=(692, 6)
+/media/haziq/Haziq/mocap/data/self/train/haziq/mhr/laptop_webcam/20260104_002750_mhr_outputs.npz [NaN after convert] right_hand_pose shape=(692, 6)
+/media/haziq/Haziq/mocap/data/self/train/haziq/mhr/laptop_webcam/20260104_002750_mhr_outputs.npz [NaN after convert] expression shape=(692, 10)
+[RUN] train / haziq / laptop_webcam / 20260104_004411
+['vertices', 'pred_pose_raw', 'pred_cam_t', 'pred_joint_coords', 'pred_keypoints_3d', 'pred_keypoints_2d', 'bbox', 'focal_length', 'global_rot', 'body_pose_params', 'hand_pose_params', 'scale_params', 'shape_params', 'expr_params', 'pred_global_rots', 'lhand_bbox', 'rhand_bbox', 'frame_indices', 'meta']
+[RUN] train / haziq / laptop_webcam / 20260104_004500
+['vertices', 'pred_pose_raw', 'pred_cam_t', 'pred_joint_coords', 'pred_keypoints_3d', 'pred_keypoints_2d', 'bbox', 'focal_length', 'global_rot', 'body_pose_params', 'hand_pose_params', 'scale_params', 'shape_params', 'expr_params', 'pred_global_rots', 'lhand_bbox', 'rhand_bbox', 'frame_indices', 'meta']
+[RUN] train / haziq / laptop_webcam / 20260104_004703
+['vertices', 'pred_pose_raw', 'pred_cam_t', 'pred_joint_coords', 'pred_keypoints_3d', 'pred_keypoints_2d', 'bbox', 'focal_length', 'global_rot', 'body_pose_params', 'hand_pose_params', 'scale_params', 'shape_params', 'expr_params', 'pred_global_rots', 'lhand_bbox', 'rhand_bbox', 'frame_indices', 'meta']
+[RUN] train / haziq / laptop_webcam / 20260104_004803
+['vertices', 'pred_pose_raw', 'pred_cam_t', 'pred_joint_coords', 'pred_keypoints_3d', 'pred_keypoints_2d', 'bbox', 'focal_length', 'global_rot', 'body_pose_params', 'hand_pose_params', 'scale_params', 'shape_params', 'expr_params', 'pred_global_rots', 'lhand_bbox', 'rhand_bbox', 'frame_indices', 'meta']
+[RUN] train / haziq / laptop_webcam / 20260104_004854
+['vertices', 'pred_pose_raw', 'pred_cam_t', 'pred_joint_coords', 'pred_keypoints_3d', 'pred_keypoints_2d', 'bbox', 'focal_length', 'global_rot', 'body_pose_params', 'hand_pose_params', 'scale_params', 'shape_params', 'expr_params', 'pred_global_rots', 'lhand_bbox', 'rhand_bbox', 'frame_indices', 'meta']
+[RUN] train / haziq / laptop_webcam / 20260104_005339
+['vertices', 'pred_pose_raw', 'pred_cam_t', 'pred_joint_coords', 'pred_keypoints_3d', 'pred_keypoints_2d', 'bbox', 'focal_length', 'global_rot', 'body_pose_params', 'hand_pose_params', 'scale_params', 'shape_params', 'expr_params', 'pred_global_rots', 'lhand_bbox', 'rhand_bbox', 'frame_indices', 'meta']
+[RUN] train / haziq / laptop_webcam / 20260104_005833
+['vertices', 'pred_pose_raw', 'pred_cam_t', 'pred_joint_coords', 'pred_keypoints_3d', 'pred_keypoints_2d', 'bbox', 'focal_length', 'global_rot', 'body_pose_params', 'hand_pose_params', 'scale_params', 'shape_params', 'expr_params', 'pred_global_rots', 'lhand_bbox', 'rhand_bbox', 'frame_indices', 'meta']
+[RUN] train / haziq / laptop_webcam / 20260104_010111
+['vertices', 'pred_pose_raw', 'pred_cam_t', 'pred_joint_coords', 'pred_keypoints_3d', 'pred_keypoints_2d', 'bbox', 'focal_length', 'global_rot', 'body_pose_params', 'hand_pose_params', 'scale_params', 'shape_params', 'expr_params', 'pred_global_rots', 'lhand_bbox', 'rhand_bbox', 'frame_indices', 'meta']
+[RUN] train / haziq / laptop_webcam / 20260104_010412
+['vertices', 'pred_pose_raw', 'pred_cam_t', 'pred_joint_coords', 'pred_keypoints_3d', 'pred_keypoints_2d', 'bbox', 'focal_length', 'global_rot', 'body_pose_params', 'hand_pose_params', 'scale_params', 'shape_params', 'expr_params', 'pred_global_rots', 'lhand_bbox', 'rhand_bbox', 'frame_indices', 'meta']
+
+==============================================
+Processing split: val
+Split dir: /media/haziq/Haziq/mocap/data/self/val
+==============================================
+==============================================
+Processing subject: val/haziq
+Camera:    laptop_webcam
+MHR dir:   /media/haziq/Haziq/mocap/data/self/val/haziq/mhr/laptop_webcam
+SMPLX dir: /media/haziq/Haziq/mocap/data/self/val/haziq/smplx/laptop_webcam
+==============================================
+[RUN] val / haziq / laptop_webcam / 20260104_010111
+['vertices', 'pred_pose_raw', 'pred_cam_t', 'pred_joint_coords', 'pred_keypoints_3d', 'pred_keypoints_2d', 'bbox', 'focal_length', 'global_rot', 'body_pose_params', 'hand_pose_params', 'scale_params', 'shape_params', 'expr_params', 'pred_global_rots', 'lhand_bbox', 'rhand_bbox', 'frame_indices', 'meta']
+[RUN] val / haziq / laptop_webcam / 20260104_010412
+['vertices', 'pred_pose_raw', 'pred_cam_t', 'pred_joint_coords', 'pred_keypoints_3d', 'pred_keypoints_2d', 'bbox', 'focal_length', 'global_rot', 'body_pose_params', 'hand_pose_params', 'scale_params', 'shape_params', 'expr_params', 'pred_global_rots', 'lhand_bbox', 'rhand_bbox', 'frame_indices', 'meta']
+==============================================
+✅ TEST_MODE=0 finished — all conversions done
+==============================================
