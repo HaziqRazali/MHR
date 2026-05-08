@@ -121,6 +121,113 @@ def to_smplx_vertices(smplx_model, params: dict, batch_size: int = 64) -> torch.
 
 
 # ---------------------------------------------------------------------------
+# Triptych video renderer
+# ---------------------------------------------------------------------------
+
+def _render_triptych_video(full_verts, mhr_faces, out_video, fps=30.0, panel_h=360):
+    """
+    Render a 3-panel side-by-side video of the MHR mesh sequence.
+
+    Each frame shows the same MHR mesh three times, evenly spaced horizontally,
+    on a white background — matching the style of mhr/{action}.mp4 in the
+    fit3d dataset.
+
+    full_verts : (T, V, 3) float32, metres. NaN rows → blank white frame.
+    mhr_faces  : (F, 3) int32
+    out_video  : output .mp4 path
+    fps        : frames per second
+    panel_h    : height in pixels; total output is (3*panel_h) × panel_h
+    """
+    import cv2
+    os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
+    import pyrender
+    import trimesh
+
+    T, V, _ = full_verts.shape
+    panel_w = panel_h * 3   # 3:1 aspect (3 square panels side by side)
+
+    # ── reference frame for stable camera ────────────────────────────────────
+    valid_mask = np.isfinite(full_verts).all(axis=(1, 2))
+    if not valid_mask.any():
+        print("[VIDEO] No valid frames — skipping video render.")
+        return
+
+    ref_verts = full_verts[np.argmax(valid_mask)]   # (V, 3)
+    vmin = ref_verts.min(axis=0)
+    vmax = ref_verts.max(axis=0)
+    center = (vmin + vmax) * 0.5
+    mesh_w = float(vmax[0] - vmin[0])
+    gap    = mesh_w + 0.3   # horizontal spacing between mesh centres
+
+    # ── camera: covers all 3 meshes ──────────────────────────────────────────
+    combined_half_w = gap + mesh_w * 0.5
+    combined_diag   = np.sqrt(
+        (2 * combined_half_w) ** 2
+        + (vmax[1] - vmin[1]) ** 2
+        + (vmax[2] - vmin[2]) ** 2
+    )
+    ref_radius = float(combined_diag) * 0.5
+    cam_dist   = 2.5 * ref_radius
+
+    cam_pose = np.eye(4, dtype=np.float32)
+    cam_pose[:3, 3] = center + np.array([0.0, 0.0, cam_dist], dtype=np.float32)
+
+    scene = pyrender.Scene(
+        ambient_light=[0.4, 0.4, 0.4],
+        bg_color=[1.0, 1.0, 1.0],
+    )
+    camera   = pyrender.PerspectiveCamera(yfov=np.pi / 3.0, aspectRatio=3.0)
+    cam_node = scene.add(camera, pose=cam_pose)
+    scene.add(pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=4.0), pose=cam_pose)
+
+    renderer   = pyrender.OffscreenRenderer(panel_w, panel_h)
+    x_offsets  = np.array([-gap, 0.0, gap], dtype=np.float32)
+    mesh_nodes = [None, None, None]
+
+    os.makedirs(os.path.dirname(os.path.abspath(out_video)), exist_ok=True)
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    writer = cv2.VideoWriter(out_video, fourcc, fps, (panel_w, panel_h))
+
+    blank = np.full((panel_h, panel_w, 3), 255, dtype=np.uint8)
+    vc    = np.full((V, 4), 0.8, dtype=np.float32)   # grey vertex colour
+    vc[:, 3] = 1.0
+
+    print(f"\n[VIDEO] Rendering {T} frames → {out_video}")
+    print(f"  output : {panel_w}×{panel_h} px   fps={fps:.1f}   gap={gap:.3f} m")
+
+    for t in range(T):
+        if t % 100 == 0:
+            print(f"  [{t}/{T}]")
+
+        verts = full_verts[t]
+        if not np.isfinite(verts).all():
+            writer.write(blank)
+            continue
+
+        # Remove previous mesh nodes
+        for i in range(3):
+            if mesh_nodes[i] is not None:
+                scene.remove_node(mesh_nodes[i])
+                mesh_nodes[i] = None
+
+        # Add 3 copies with X offset
+        for i, dx in enumerate(x_offsets):
+            v = verts.copy()
+            v[:, 0] += dx
+            tri     = trimesh.Trimesh(vertices=v, faces=mhr_faces,
+                                      vertex_colors=vc, process=False)
+            mesh_pr = pyrender.Mesh.from_trimesh(tri, smooth=True)
+            mesh_nodes[i] = scene.add(mesh_pr)
+
+        color, _ = renderer.render(scene)
+        writer.write(cv2.cvtColor(color, cv2.COLOR_RGB2BGR))
+
+    writer.release()
+    renderer.delete()
+    print(f"✅ Video saved → {out_video}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -185,6 +292,31 @@ def main():
         choices=["neutral", "male", "female"],
         help="SMPL-X model gender.",
     )
+    # ── Video rendering ──────────────────────────────────────────────────────
+    parser.add_argument(
+        "--out_video",
+        type=str,
+        default=None,
+        help="Path to output triptych .mp4 (default: same as --out_npz with .mp4 extension).",
+    )
+    parser.add_argument(
+        "--no_video",
+        action="store_true",
+        default=False,
+        help="Skip triptych video rendering.",
+    )
+    parser.add_argument(
+        "--video_fps",
+        type=float,
+        default=30.0,
+        help="Output video frame rate.",
+    )
+    parser.add_argument(
+        "--video_panel_h",
+        type=int,
+        default=360,
+        help="Height of each panel in pixels (total width = 3 × panel_h).",
+    )
     args = parser.parse_args()
 
     # ------------------------------------------------------------------
@@ -201,12 +333,17 @@ def main():
         base = os.path.splitext(args.smplx_json)[0]
         out_npz = base + "_mhr.npz"
 
+    out_video = args.out_video
+    if out_video is None and not args.no_video:
+        out_video = os.path.splitext(out_npz)[0] + ".mp4"
+
     os.makedirs(os.path.dirname(os.path.abspath(out_npz)), exist_ok=True)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(f"[INFO] device        : {device}")
     print(f"[INFO] smplx_json    : {args.smplx_json}")
     print(f"[INFO] out_npz       : {out_npz}")
+    print(f"[INFO] out_video     : {out_video if out_video else '(skipped)'}")
     print(f"[INFO] method        : {args.method}")
     print(f"[INFO] single_id     : {args.single_identity}")
 
@@ -317,6 +454,17 @@ def main():
     np.savez_compressed(out_npz, **save_dict)
     print(f"\n✅ Done. Saved {T_full} frames ({len(good_idx)} valid) to: {out_npz}")
     print(f"   vertices  : {full_verts.shape}  dtype={full_verts.dtype}  (metres)")
+
+    # ── Optional: render triptych video ──────────────────────────────────────
+    if out_video is not None:
+        mhr_faces = np.asarray(mhr_model.character.mesh.faces, dtype=np.int32)
+        _render_triptych_video(
+            full_verts,
+            mhr_faces,
+            out_video,
+            fps=args.video_fps,
+            panel_h=args.video_panel_h,
+        )
 
 
 if __name__ == "__main__":
