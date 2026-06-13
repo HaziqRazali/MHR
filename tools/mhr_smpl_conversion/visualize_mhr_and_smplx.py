@@ -522,22 +522,32 @@ def main(args):
 
     device = torch.device(args.device)
 
-<<<<<<< HEAD
-    if "body_pose_params" in data.files and np.asarray(data["body_pose_params"]).ndim == 1:
-        # ── sam-3d-body single-frame format ──────────────────────────────────
-        # body_pose_params (133,): 130 body joint angles + 3 jaw (always zero)
-=======
     if "body_pose_params" in data.files:
-        # ── sam-3d-body format (single-frame or multi-frame) ─────────────────
-        # body_pose_params can be (133,) or (T, 133)
->>>>>>> 8b048636b31b6035c17937047dc16b3c390af738
-        # file:///home/haziq/sam-3d-body/sam_3d_body/sam_3d_body_estimator.py
         bp = data["body_pose_params"]
         if bp.ndim == 1:
-            # Single-frame: (133,)
-            body_pose = torch.tensor(bp[:130], dtype=torch.float32)  # (130,)
+            # ── Single-frame: (133,)  ───────────────────────────────────────
+            body_pose = torch.tensor(bp[:130], dtype=torch.float32)
+        elif "shape_params" in data.files and "global_trans" in data.files:
+            # ── smpl_to_mhr output (multi-frame) ─────────────────────────────
+            # body_pose_params (N, 130), shape_params (N, 45), expr_params (N,72)
+            # global_trans (N,3), global_orient (N,3)
+            T = bp.shape[0]
+            frame = args.frame
+            print(f"  Sequence length: {T} frames")
+            if frame < 0 or frame >= T:
+                print(f"[ERROR] --frame {frame} is out of range [0, {T - 1}]")
+                sys.exit(1)
+            print(f"  Using frame {frame}")
+            model_params = torch.zeros(1, 204, dtype=torch.float32)
+            model_params[0, 0:3]   = torch.tensor(data["global_trans"][frame],  dtype=torch.float32)
+            model_params[0, 3:6]   = torch.tensor(data["global_orient"][frame], dtype=torch.float32)
+            model_params[0, 6:136] = torch.tensor(bp[frame], dtype=torch.float32)
+            shape_params = torch.tensor(data["shape_params"][frame:frame+1], dtype=torch.float32)
+            expr_params  = torch.tensor(data["expr_params"][frame:frame+1],  dtype=torch.float32)
+            # Skip model_params/expr_params/shape_params assignment at end
+            skip_end = True
         else:
-            # Multi-frame: (T, 133)
+            # ── sam-3d-body multi-frame: (T, 133) ───────────────────────────
             T = bp.shape[0]
             frame = args.frame
             print(f"  Sequence length: {T} frames")
@@ -547,32 +557,11 @@ def main(args):
             print(f"  Using frame {frame}")
             body_pose = torch.tensor(bp[frame, :130], dtype=torch.float32)  # (130,)
 
-        # Build model_params (204,) with only body joints, everything else zeroed:
-        #   [0:6]    zeros — global trans (3) + global rot (3)
-        #   [6:136]  body_pose_params[:130]
-        #   [136:204] zeros — scale params (68)
-        model_params = torch.zeros(1, 204, dtype=torch.float32)   # (1, 204)
-        model_params[0, 6:136] = body_pose
-        shape_params = torch.zeros(1, 45, dtype=torch.float32)    # (1, 45)
-        expr_params  = torch.zeros(1, 72, dtype=torch.float32)    # (1, 72)
-
-    elif "body_pose_params" in data.files and np.asarray(data["body_pose_params"]).ndim == 2:
-        # ── smpl_to_mhr output format (multi-frame) ──────────────────────────
-        # body_pose_params (N, 130), shape_params (N, 45), expr_params (N, 72),
-        # global_orient (N, 3) axis-angle, global_trans (N, 3)
-        T = data["body_pose_params"].shape[0]
-        frame = args.frame
-        print(f"  Sequence length: {T} frames")
-        if frame < 0 or frame >= T:
-            print(f"[ERROR] --frame {frame} is out of range [0, {T - 1}]")
-            sys.exit(1)
-        print(f"  Using frame {frame}")
-        model_params = torch.zeros(1, 204, dtype=torch.float32)
-        model_params[0, 0:3]  = torch.tensor(data["global_trans"][frame],   dtype=torch.float32)
-        model_params[0, 3:6]  = torch.tensor(data["global_orient"][frame],  dtype=torch.float32)
-        model_params[0, 6:136] = torch.tensor(data["body_pose_params"][frame], dtype=torch.float32)
-        shape_params = torch.tensor(data["shape_params"][frame:frame+1],  dtype=torch.float32)  # (1, 45)
-        expr_params  = torch.tensor(data["expr_params"][frame:frame+1],   dtype=torch.float32)  # (1, 72)
+        if not locals().get("skip_end"):
+            model_params = torch.zeros(1, 204, dtype=torch.float32)
+            model_params[0, 6:136] = body_pose
+            shape_params = torch.zeros(1, 45, dtype=torch.float32)
+            expr_params  = torch.zeros(1, 72, dtype=torch.float32)
 
     elif "param_lbs_model_params" in data.files:
         # ── fit3d / dataset multi-frame format ───────────────────────────────
