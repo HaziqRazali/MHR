@@ -522,11 +522,30 @@ def main(args):
 
     device = torch.device(args.device)
 
+<<<<<<< HEAD
     if "body_pose_params" in data.files and np.asarray(data["body_pose_params"]).ndim == 1:
         # ── sam-3d-body single-frame format ──────────────────────────────────
         # body_pose_params (133,): 130 body joint angles + 3 jaw (always zero)
+=======
+    if "body_pose_params" in data.files:
+        # ── sam-3d-body format (single-frame or multi-frame) ─────────────────
+        # body_pose_params can be (133,) or (T, 133)
+>>>>>>> 8b048636b31b6035c17937047dc16b3c390af738
         # file:///home/haziq/sam-3d-body/sam_3d_body/sam_3d_body_estimator.py
-        body_pose = torch.tensor(data["body_pose_params"][:130], dtype=torch.float32)  # (130,)
+        bp = data["body_pose_params"]
+        if bp.ndim == 1:
+            # Single-frame: (133,)
+            body_pose = torch.tensor(bp[:130], dtype=torch.float32)  # (130,)
+        else:
+            # Multi-frame: (T, 133)
+            T = bp.shape[0]
+            frame = args.frame
+            print(f"  Sequence length: {T} frames")
+            if frame < 0 or frame >= T:
+                print(f"[ERROR] --frame {frame} is out of range [0, {T - 1}]")
+                sys.exit(1)
+            print(f"  Using frame {frame}")
+            body_pose = torch.tensor(bp[frame, :130], dtype=torch.float32)  # (130,)
 
         # Build model_params (204,) with only body joints, everything else zeroed:
         #   [0:6]    zeros — global trans (3) + global rot (3)

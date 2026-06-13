@@ -248,8 +248,8 @@ def main():
     smplx_results = converter.convert_mhr2smpl(
         mhr_vertices=verts_opt * float(args.scale),
         return_smpl_parameters=True,
-        single_identity=True,
-        is_tracking=True,
+        single_identity=False,
+        is_tracking=False,
     )
 
     smplx_params = smplx_results.result_parameters
