@@ -14,6 +14,7 @@ from smplx.lbs import batch_rodrigues
 CANDIDATES = [
     os.path.expanduser("/media/haziq/Haziq/mocap/my_scripts"),
     os.path.expanduser("~/datasets/mocap/my_scripts"),
+    os.path.expanduser("/data/haziq/mocap/my_scripts"),
 ]
 for p in CANDIDATES:
     if os.path.isdir(p):
@@ -93,6 +94,7 @@ def ensure_parent_dir(path):
 
 def find_smplx_path():
     candidates = [
+        os.path.expanduser("/data/haziq/mocap/data/models_smplx_v1_1/models/smplx"),
         os.path.expanduser("/media/haziq/Haziq/mocap/data/models_smplx_v1_1/models/smplx"),
         os.path.expanduser("~/datasets/mocap/data/models_smplx_v1_1/models/smplx"),
     ]

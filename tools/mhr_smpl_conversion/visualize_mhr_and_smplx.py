@@ -27,14 +27,20 @@
 #
 # Usage:
 #   python /home/haziq/MHR/tools/mhr_smpl_conversion/visualize_mhr_and_smplx.py --npz /home/haziq/sam-3d-body/example_data/results/img.npz --show_axes --convert_smplx
-#   python /home/haziq/MHR/tools/mhr_smpl_conversion/visualize_mhr_and_smplx.py --npz /home/haziq/datasets/mocap/data/fit3d/train/s03/mhr/band_pull_apart.npz --frame 100 --show_axes --convert_smplx
+#   PYOPENGL_PLATFORM=egl conda run -n mhr_new python /home/haziq/MHR/tools/mhr_smpl_conversion/visualize_mhr_and_smplx.py --npz /data/haziq/mocap/data/fit3d/train/s03/mhr/squat.npz --frame 600 --convert_smplx --save_image /tmp/out.png
 
 import argparse
 import os
 import sys
 
+os.environ.setdefault('PYOPENGL_PLATFORM', 'egl')  # headless rendering
+
 import numpy as np
-import open3d as o3d
+try:
+    import open3d as o3d
+except ImportError:
+    o3d = None
+    print("[WARN] open3d not available — interactive viewer disabled; --save_image still works.")
 import torch
 from scipy.spatial.transform import Rotation as ScipyR
 
@@ -234,6 +240,7 @@ def mhr_joints_and_edges(skel_state_np: np.ndarray, parents: list):
 
 def find_smplx_path():
     candidates = [
+        "/data/haziq/mocap/data/models_smplx_v1_1/models/smplx",
         "/home/haziq/datasets/mocap/data/models_smplx_v1_1/models/smplx",
         "/home/haziq/datasets/motion-x++/data/models_smplx_v1_1/models/smplx",
         os.path.expanduser("/media/haziq/Haziq/mocap/data/models_smplx_v1_1/models/smplx"),
@@ -352,6 +359,83 @@ def convert_mhr_to_smplx(verts_m: np.ndarray, mhr_model, device, smplx_path: str
     return smplx_verts_m, smplx_faces, smplx_joints_m, amass_params
 
 
+def render_geoms_offscreen(raw_meshes, width: int = 1920, height: int = 800,
+                           view_euler_xyz=(270, 270, 0)):
+    """Render meshes offscreen with pyrender.  Does not require Open3D.
+
+    raw_meshes: list of (verts_np, faces_np, color_float3, panel_col) tuples.
+      panel_col is an integer (-1 = left, 0 = centre, +1 = right, etc.).
+      The gap between panels is computed automatically from the rotated
+      centre-panel bounding box, so the layout is always correct regardless
+      of the view rotation.
+    view_euler_xyz: (Rx, Ry, Rz) degrees applied to ALL vertices so the figure
+                    faces the camera.  Default (270, 270, 0) calibrated for MHR.
+    Returns (H, W, 3) uint8 RGB, or None if no meshes found.
+    """
+    import pyrender
+    import trimesh as _trimesh
+
+    view_rot = ScipyR.from_euler('xyz', list(view_euler_xyz), degrees=True).as_matrix()
+
+    # ── compute panel gap from centre-panel meshes (col == 0) after rotation ──
+    centre_verts = []
+    for entry in raw_meshes:
+        verts, faces, color, panel_col = entry
+        if panel_col == 0:
+            centre_verts.append((view_rot @ verts.T).T)
+    if centre_verts:
+        cv = np.concatenate(centre_verts, axis=0)
+        panel_gap = (cv[:, 0].max() - cv[:, 0].min()) + 0.3
+    else:
+        panel_gap = 1.5
+
+    scene = pyrender.Scene(
+        bg_color=[0.15, 0.15, 0.15, 1.0],
+        ambient_light=[0.4, 0.4, 0.4],
+    )
+
+    all_verts = []
+    for verts, faces, color, panel_col in raw_meshes:
+        if len(verts) == 0 or len(faces) == 0:
+            continue
+        v = (view_rot @ verts.T).T
+        v[:, 0] += panel_gap * panel_col   # layout shift in view space
+        all_verts.append(v)
+        vc_rgb = (np.array(color[:3]) * 255).clip(0, 255).astype(np.uint8)
+        vc = np.tile(vc_rgb, (len(v), 1))  # uniform vertex color (V, 3)
+        tm = _trimesh.Trimesh(vertices=v, faces=faces, vertex_colors=vc)
+        mesh = pyrender.Mesh.from_trimesh(tm, smooth=True)
+        scene.add(mesh)
+
+    if not all_verts:
+        return None
+
+    # Auto-fit camera: frontal view (+Z axis), centred on scene bounds
+    all_v    = np.concatenate(all_verts, axis=0)
+    centroid = all_v.mean(axis=0)
+    extent   = np.abs(all_v - centroid).max()
+    cam_dist = extent * 3.5
+
+    # pyrender camera looks along its local -Z; place it at centroid + [0,0,+dist]
+    cam_pose = np.eye(4, dtype=np.float64)
+    cam_pose[:3, 3] = centroid + np.array([0.0, 0.0, cam_dist])
+    scene.add(
+        pyrender.PerspectiveCamera(yfov=np.pi / 4.0, aspectRatio=width / height),
+        pose=cam_pose,
+    )
+
+    # Key light (upper-right) + fill light (left)
+    lp1 = np.eye(4); lp1[:3, 3] = centroid + np.array([ 1.0,  2.0, cam_dist * 0.8])
+    lp2 = np.eye(4); lp2[:3, 3] = centroid + np.array([-1.0,  0.5, cam_dist * 0.5])
+    scene.add(pyrender.DirectionalLight(color=np.ones(3), intensity=4.0), pose=lp1)
+    scene.add(pyrender.DirectionalLight(color=np.ones(3), intensity=1.5), pose=lp2)
+
+    r = pyrender.OffscreenRenderer(width, height)
+    color, _ = r.render(scene)
+    r.delete()
+    return color  # (H, W, 3) uint8 RGB
+
+
 # MHR → SMPLX matched joint pairs used for orientation comparison
 _MATCHED_PAIRS = [
     # (mhr_idx, mhr_name,    smplx_idx, smplx_name)
@@ -438,7 +522,7 @@ def main(args):
 
     device = torch.device(args.device)
 
-    if "body_pose_params" in data.files:
+    if "body_pose_params" in data.files and np.asarray(data["body_pose_params"]).ndim == 1:
         # ── sam-3d-body single-frame format ──────────────────────────────────
         # body_pose_params (133,): 130 body joint angles + 3 jaw (always zero)
         # file:///home/haziq/sam-3d-body/sam_3d_body/sam_3d_body_estimator.py
@@ -452,6 +536,24 @@ def main(args):
         model_params[0, 6:136] = body_pose
         shape_params = torch.zeros(1, 45, dtype=torch.float32)    # (1, 45)
         expr_params  = torch.zeros(1, 72, dtype=torch.float32)    # (1, 72)
+
+    elif "body_pose_params" in data.files and np.asarray(data["body_pose_params"]).ndim == 2:
+        # ── smpl_to_mhr output format (multi-frame) ──────────────────────────
+        # body_pose_params (N, 130), shape_params (N, 45), expr_params (N, 72),
+        # global_orient (N, 3) axis-angle, global_trans (N, 3)
+        T = data["body_pose_params"].shape[0]
+        frame = args.frame
+        print(f"  Sequence length: {T} frames")
+        if frame < 0 or frame >= T:
+            print(f"[ERROR] --frame {frame} is out of range [0, {T - 1}]")
+            sys.exit(1)
+        print(f"  Using frame {frame}")
+        model_params = torch.zeros(1, 204, dtype=torch.float32)
+        model_params[0, 0:3]  = torch.tensor(data["global_trans"][frame],   dtype=torch.float32)
+        model_params[0, 3:6]  = torch.tensor(data["global_orient"][frame],  dtype=torch.float32)
+        model_params[0, 6:136] = torch.tensor(data["body_pose_params"][frame], dtype=torch.float32)
+        shape_params = torch.tensor(data["shape_params"][frame:frame+1],  dtype=torch.float32)  # (1, 45)
+        expr_params  = torch.tensor(data["expr_params"][frame:frame+1],   dtype=torch.float32)  # (1, 72)
 
     elif "param_lbs_model_params" in data.files:
         # ── fit3d / dataset multi-frame format ───────────────────────────────
@@ -470,8 +572,10 @@ def main(args):
 
     else:
         print("\n[ERROR] Unrecognised NPZ format.")
-        print("  Expected either 'body_pose_params' (sam-3d-body) or")
-        print("  'param_lbs_model_params' (fit3d/dataset multi-frame).")
+        print("  Expected one of:")
+        print("    body_pose_params (133,)   — sam-3d-body single frame")
+        print("    body_pose_params (N, 130) — smpl_to_mhr output (multi-frame)")
+        print("    param_lbs_model_params (T, 204) — fit3d/dataset multi-frame")
         sys.exit(1)
 
     model_params = model_params.to(device)
@@ -508,10 +612,14 @@ def main(args):
     mhr_joints_m, mhr_edges = mhr_joints_and_edges(mhr_skel_np, mhr_parents)
 
     # ── 4. Build geometry ────────────────────────────────────────────────────
-    mhr_mesh = make_o3d_mesh(verts_np, mhr_faces, color=(0.9, 0.2, 0.2))  # red
-    geoms    = [mhr_mesh]
-    if args.show_spheres:
-        geoms.append(make_o3d_joint_spheres(mhr_joints_m, color=(1.0, 0.3, 0.3)))
+    # raw_meshes: always built for pyrender offscreen rendering (no o3d needed)
+    # panel_col: -1=left, 0=centre, +1=right — gap applied post-rotation in view space
+    raw_meshes = [(verts_np, mhr_faces, (0.9, 0.2, 0.2), 0)]
+    geoms = []
+    if o3d is not None:
+        geoms = [make_o3d_mesh(verts_np, mhr_faces, color=(0.9, 0.2, 0.2))]  # red
+        if args.show_spheres:
+            geoms.append(make_o3d_joint_spheres(mhr_joints_m, color=(1.0, 0.3, 0.3)))
 
     # ── 5. Optional: convert MHR → SMPL-X and overlay ────────────────────────
     if args.convert_smplx:
@@ -526,6 +634,14 @@ def main(args):
         )
         print(f"  SMPL-X verts:  {smplx_verts.shape}   range [{smplx_verts.min():.3f}, {smplx_verts.max():.3f}] m")
         print(f"  SMPL-X joints: {smplx_joints_m.shape}")
+
+        # ── Per-vertex nearest-neighbour distance: SMPLX → MHR ───────────────
+        from scipy.spatial import cKDTree as _KDTree
+        _mhr_tree = _KDTree(verts_np)
+        _dists, _ = _mhr_tree.query(smplx_verts, k=1, workers=-1)
+        print(f"  Mean per-vertex dist (SMPLX→MHR nearest): {_dists.mean()*1000:.2f} mm"
+              f"  |  max: {_dists.max()*1000:.2f} mm"
+              f"  |  median: {float(np.median(_dists))*1000:.2f} mm")
 
         # ── Print global orientation comparison ───────────────────────────────
         print_global_orient_comparison(mhr_skel_np, smplx_amass_params)
@@ -542,36 +658,49 @@ def main(args):
         mhr_verts_left[:, 0] -= gap
         mhr_joints_left = mhr_joints_m.copy()
         mhr_joints_left[:, 0] -= gap
-        geoms = [
-            make_o3d_mesh(mhr_verts_left, mhr_faces, color=(0.9, 0.2, 0.2)),           # red mesh
-            make_o3d_skeleton(mhr_joints_left, mhr_edges, color=(1.0, 0.3, 0.3)),       # red skel
-        ]
-        if args.show_spheres:
-            geoms.append(make_o3d_joint_spheres(mhr_joints_left, color=(1.0, 0.3, 0.3)))
-
-        # CENTER — MHR + SMPL-X overlapping meshes + both skeletons
-        geoms += [
-            make_o3d_mesh(verts_np,    mhr_faces,   color=(0.9, 0.2, 0.2)),             # red mesh
-            make_o3d_mesh(smplx_verts, smplx_faces, color=(0.3, 0.6, 1.0)),             # blue mesh
-            make_o3d_skeleton(mhr_joints_m,   mhr_edges,    color=(1.0, 0.3, 0.3)),     # red skel
-            make_o3d_skeleton(smplx_joints_m, _SMPLX_EDGES, color=(0.3, 0.6, 1.0)),    # blue skel
-        ]
-        # spheres intentionally omitted for the center overlap panel
 
         # RIGHT — SMPL-X mesh + SMPL-X skeleton + IK labels
         smplx_verts_right = smplx_verts.copy()
         smplx_verts_right[:, 0] += gap
         smplx_joints_right = smplx_joints_m.copy()
         smplx_joints_right[:, 0] += gap
-        geoms += [
-            make_o3d_mesh(smplx_verts_right, smplx_faces, color=(0.3, 0.6, 1.0)),       # blue mesh
-            make_o3d_skeleton(smplx_joints_right, _SMPLX_EDGES, color=(0.3, 0.6, 1.0)), # blue skel
+
+        # raw_meshes for pyrender: LEFT MHR | CENTER MHR + SMPLX | RIGHT SMPLX
+        # panel_col drives horizontal spacing applied AFTER view rotation
+        raw_meshes = [
+            (verts_np,    mhr_faces,   (0.9, 0.2, 0.2), -1),  # LEFT: MHR red
+            (verts_np,    mhr_faces,   (0.9, 0.2, 0.2),  0),  # CENTER: MHR red
+            (smplx_verts, smplx_faces, (0.3, 0.6, 1.0),  0),  # CENTER: SMPLX blue
+            (smplx_verts, smplx_faces, (0.3, 0.6, 1.0),  1),  # RIGHT: SMPLX blue
         ]
-        if args.show_spheres:
-            geoms.append(make_o3d_joint_spheres(smplx_joints_right[_SMPLX_SPHERE_JOINTS], color=(0.3, 0.6, 1.0)))
-        # IK joint name labels on right SMPL-X skeleton
-        if not args.no_labels:
-            geoms += make_smplx_joint_labels(smplx_joints_m, x_offset=gap)
+
+        geoms = []
+        if o3d is not None:
+            geoms = [
+                make_o3d_mesh(mhr_verts_left, mhr_faces, color=(0.9, 0.2, 0.2)),           # red mesh
+                make_o3d_skeleton(mhr_joints_left, mhr_edges, color=(1.0, 0.3, 0.3)),       # red skel
+            ]
+            if args.show_spheres:
+                geoms.append(make_o3d_joint_spheres(mhr_joints_left, color=(1.0, 0.3, 0.3)))
+
+            # CENTER — MHR + SMPL-X overlapping meshes + both skeletons
+            geoms += [
+                make_o3d_mesh(verts_np,    mhr_faces,   color=(0.9, 0.2, 0.2)),             # red mesh
+                make_o3d_mesh(smplx_verts, smplx_faces, color=(0.3, 0.6, 1.0)),             # blue mesh
+                make_o3d_skeleton(mhr_joints_m,   mhr_edges,    color=(1.0, 0.3, 0.3)),     # red skel
+                make_o3d_skeleton(smplx_joints_m, _SMPLX_EDGES, color=(0.3, 0.6, 1.0)),    # blue skel
+            ]
+            # spheres intentionally omitted for the center overlap panel
+
+            geoms += [
+                make_o3d_mesh(smplx_verts_right, smplx_faces, color=(0.3, 0.6, 1.0)),       # blue mesh
+                make_o3d_skeleton(smplx_joints_right, _SMPLX_EDGES, color=(0.3, 0.6, 1.0)), # blue skel
+            ]
+            if args.show_spheres:
+                geoms.append(make_o3d_joint_spheres(smplx_joints_right[_SMPLX_SPHERE_JOINTS], color=(0.3, 0.6, 1.0)))
+            # IK joint name labels on right SMPL-X skeleton
+            if not args.no_labels:
+                geoms += make_smplx_joint_labels(smplx_joints_m, x_offset=gap)
 
         print(f"  Layout: MHR (left, -{gap:.2f} m) | MHR+SMPL-X+skeletons+labels (center) | SMPL-X+labels (right, +{gap:.2f} m)")
 
@@ -597,17 +726,35 @@ def main(args):
             )
             print(f"  Saved SMPL-X results to: {args.save_smplx}")
 
-    if args.show_axes:
+    if args.show_axes and o3d is not None:
         geoms.append(o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.5, origin=[0, 0, 0]))
 
-    # ── 6. Show ───────────────────────────────────────────────────────────────
+    # ── 6. Save image (offscreen) and/or show interactive viewer ────────────
     label = "MHR alone | MHR+SMPL-X overlap | SMPL-X alone" if args.convert_smplx else "MHR Mesh"
-    print(f"\nOpening Open3D viewer  [{label}]  (press Q to quit, H for help) ...")
-    o3d.visualization.draw_geometries(
-        geoms,
-        window_name=label,
-        mesh_show_back_face=True,
-    )
+
+    if args.save_image is not None:
+        print(f"\nRendering offscreen ({args.image_width}×{args.image_height}) ...")
+        img = render_geoms_offscreen(raw_meshes, width=args.image_width, height=args.image_height)
+        if img is not None:
+            import cv2 as _cv2
+            save_dir = os.path.dirname(os.path.abspath(args.save_image))
+            if save_dir:
+                os.makedirs(save_dir, exist_ok=True)
+            _cv2.imwrite(args.save_image, _cv2.cvtColor(img, _cv2.COLOR_RGB2BGR))
+            print(f"  Saved → {args.save_image}")
+        else:
+            print("  [WARN] No meshes to render — image not saved.")
+
+    if args.save_image is None or args.show:
+        if o3d is None:
+            print("[WARN] open3d not available — cannot open interactive viewer. Use --save_image instead.")
+        else:
+            print(f"\nOpening Open3D viewer  [{label}]  (press Q to quit, H for help) ...")
+            o3d.visualization.draw_geometries(
+                geoms,
+                window_name=label,
+                mesh_show_back_face=True,
+            )
 
 
 if __name__ == "__main__":
@@ -630,5 +777,9 @@ Examples:
     parser.add_argument("--convert_smplx", action="store_true", help="Convert MHR mesh to SMPL-X and show side by side")
     parser.add_argument("--smplx_path",    default=None,        help="Path to SMPL-X model folder (auto-detected if omitted)")
     parser.add_argument("--save_smplx",    default=None,        help="Path to save SMPL-X results as .npz (vertices, faces, joints). Requires --convert_smplx.")
+    parser.add_argument("--save_image",    default=None,        help="Path to save an offscreen-rendered PNG (e.g. out.png). Skips the O3D window unless --show is also given.")
+    parser.add_argument("--image_width",   type=int, default=1920, help="Width of the saved image in pixels (default: 1920).")
+    parser.add_argument("--image_height",  type=int, default=800,  help="Height of the saved image in pixels (default: 800).")
+    parser.add_argument("--show",          action="store_true",  help="Open the interactive O3D viewer even when --save_image is given.")
     args = parser.parse_args()
     main(args)

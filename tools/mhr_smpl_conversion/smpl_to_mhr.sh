@@ -1,23 +1,44 @@
 #!/usr/bin/env bash
-# Convert SMPL-X JSONs → MHR .npz files for a whole dataset.
-#
-# Usage:
-#   TEST_MODE=1 ./smpl_to_mhr.sh --DATA_ROOT /data/haziq/mocap/data/fit3d
-#   TEST_MODE=0 FORCE=0 ./smpl_to_mhr.sh --DATA_ROOT /data/haziq/mocap/data/fit3d
-#   TEST_MODE=0 FORCE=0 ./smpl_to_mhr.sh --DATA_ROOT /data/haziq/mocap/data/fit3d --shard 0 --num_shards 4
-#   TEST_MODE=0 FORCE=0 ./smpl_to_mhr.sh --DATA_ROOT /data/haziq/mocap/data/fit3d --shard 1 --num_shards 4
-#
-# Expected input layout:
-#   $DATA_ROOT/{train,val}/<subject>/smplx/<action>.json
-#
-# Output layout (mirrors run.sh convention):
-#   $DATA_ROOT/{train,val}/<subject>/mhr/<action>.npz
-#
-# Environment variables:
-#   TEST_MODE=1  (default) → dry run, print commands only
-#   TEST_MODE=0            → actually run
-#   FORCE=1                → overwrite existing .npz files
-#   FORCE=0    (default)   → skip if .npz already exists
+
+: << BLOCK
+Convert SMPL-X JSONs → MHR .npz files for a whole dataset.
+
+# Usage (individual commands)
+TEST_MODE=0 FORCE=0 ./smpl_to_mhr.sh --DATA_ROOT /data/haziq/mocap/data/fit3d
+TEST_MODE=0 FORCE=0 ./smpl_to_mhr.sh --DATA_ROOT /data/haziq/mocap/data/fit3d
+TEST_MODE=0 FORCE=0 ./smpl_to_mhr.sh --DATA_ROOT /data/haziq/mocap/data/fit3d --shard 0 --num_shards 4
+TEST_MODE=0 FORCE=0 ./smpl_to_mhr.sh --DATA_ROOT /data/haziq/mocap/data/fit3d --shard 1 --num_shards 4
+
+# tmux — video only (fast, keeps existing .npz)
+for s in 0 1 2 3 4 5 6 7; do
+  tmux new-window -n "shard$s" "cd ~/MHR/tools/mhr_smpl_conversion && TEST_MODE=0 FORCE_VIDEO=1 ./smpl_to_mhr.sh --DATA_ROOT /data/haziq/mocap/data/fit3d --shard $s --num_shards 8; read"
+done
+
+# tmux — full re-run from scratch (recomputes .npz with is_tracking=True)
+tmux new-session -s mhr_convert
+for s in 0 1 2 3; do
+  tmux new-window -n "shard$s" "cd ~/MHR/tools/mhr_smpl_conversion && TEST_MODE=0 FORCE=0 ./smpl_to_mhr.sh --DATA_ROOT /data/haziq/mocap/data/fit3d --shard $s --num_shards 4; read"
+done
+ctrl+B then d to detach
+ctrl+B then 0/1/2/3 to attach to a window
+tmux attach -t mhr_convert
+tmux ls
+
+Expected input layout:
+  $DATA_ROOT/{train,val}/<subject>/smplx/<action>.json
+
+Output layout (mirrors run.sh convention):
+  $DATA_ROOT/{train,val}/<subject>/mhr/<action>.npz
+
+Environment variables:
+  TEST_MODE=1  (default) → dry run, print commands only
+  TEST_MODE=0            → actually run
+  FORCE=1                → overwrite existing .npz + video (full re-run)
+  FORCE=0    (default)   → skip if both .npz and .mp4 exist
+  FORCE_VIDEO=1          → if .npz exists, re-render video only; else full pipeline
+  VIDEO=1 (default)   → generate video; re-runs if .npz exists but .mp4 is missing
+  VIDEO=0             → skip video rendering
+BLOCK
 
 set -euo pipefail
 shopt -s nullglob
@@ -27,6 +48,8 @@ SMPL_TO_MHR_PY="$SCRIPT_DIR/smpl_to_mhr.py"
 
 TEST_MODE="${TEST_MODE:-1}"
 FORCE="${FORCE:-0}"
+FORCE_VIDEO="${FORCE_VIDEO:-0}"
+VIDEO="${VIDEO:-1}"
 
 DATA_ROOT="${DATA_ROOT:-/data/haziq/mocap/data/fit3d}"
 
@@ -64,13 +87,14 @@ echo "DATA_ROOT  : $DATA_ROOT"
 echo "SCRIPT     : $SMPL_TO_MHR_PY"
 echo "TEST_MODE  : $TEST_MODE"
 echo "FORCE      : $FORCE"
+echo "VIDEO      : $VIDEO"
 echo "SHARD      : $SHARD / $NUM_SHARDS"
 echo "=============================================="
 
 # ── Collect all smplx JSON files ──────────────────────────────────────────────
 # Expected: $DATA_ROOT/{train,val}/<subject>/smplx/<action>.json
 mapfile -t JSONS < <(
-  find "$DATA_ROOT" -type f \
+  find -L "$DATA_ROOT" -type f \
     \( -path "*/train/*/smplx/*.json" -o -path "*/val/*/smplx/*.json" \) \
   | sort
 )
@@ -110,17 +134,29 @@ for idx in "${!JSONS[@]}"; do
   echo "OUT    : $out_npz"
   echo "================================================"
 
-  if [[ -f "$out_npz" && "$FORCE" -ne 1 ]]; then
-    echo "[SKIP] .npz already exists (use FORCE=1 to overwrite)"
+  out_mp4="${out_npz%.npz}.mp4"
+  _npz_ok=0;  [[ -f "$out_npz" ]] && _npz_ok=1
+  _vid_ok=0;  [[ "$VIDEO" -eq 0 || -f "$out_mp4" ]] && _vid_ok=1
+
+  if [[ "$FORCE" -ne 1 && "$FORCE_VIDEO" -ne 1 && "$_npz_ok" -eq 1 && "$_vid_ok" -eq 1 ]]; then
+    echo "[SKIP] .npz and video both exist (use FORCE=1 to overwrite, FORCE_VIDEO=1 to re-render video only)"
     echo
     continue
   fi
 
+  EXTRA_ARGS=()
+  [[ "$VIDEO" -eq 0 ]] && EXTRA_ARGS+=(--no_video)
+
+  if [[ "$_npz_ok" -eq 1 && ( "$_vid_ok" -eq 0 || "$FORCE_VIDEO" -eq 1 ) ]]; then
+    echo "[INFO] .npz exists — rendering video only"
+    EXTRA_ARGS+=(--video_only)
+  fi
+
   if [[ "$TEST_MODE" -eq 1 ]]; then
     echo "[TEST_MODE] Would run:"
-    echo "  pixi run python \"$SMPL_TO_MHR_PY\" \\"
+    echo "  conda run --no-capture-output -n mhr_new python \"$SMPL_TO_MHR_PY\" \\"
     echo "    --smplx_json \"$json_path\" \\"
-    echo "    --out_npz    \"$out_npz\""
+    echo "    --out_npz    \"$out_npz\" ${EXTRA_ARGS[*]:+\"${EXTRA_ARGS[*]}\"}"
     echo
     continue
   fi
@@ -131,9 +167,10 @@ for idx in "${!JSONS[@]}"; do
   # resolve correctly, matching the usage in the smpl_to_mhr.py docstring.
   (
     cd "$SCRIPT_DIR"
-    pixi run python "$SMPL_TO_MHR_PY" \
+    conda run --no-capture-output -n mhr_new python "$SMPL_TO_MHR_PY" \
       --smplx_json "$json_path" \
-      --out_npz    "$out_npz"
+      --out_npz    "$out_npz" \
+      "${EXTRA_ARGS[@]}"
   )
 
   echo
